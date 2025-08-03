@@ -1,77 +1,84 @@
-import streamlit as st
+# pages/1_sentence_tokenizer.py
+# --------------------------------------------------------------------
+# Sentence Tokenizer – accepts *any* CSV, lets the user map ID & text
+# columns, splits every caption / paragraph into individual sentences,
+# and (optionally) builds a two‑sentence rolling context window.
+# --------------------------------------------------------------------
+import re
 import pandas as pd
-from instagram_preprocessing import sentence_tokenize_df, add_rolling
+import streamlit as st
 
-st.set_page_config(page_title="Instagram NLP", page_icon="👔", layout="centered")
-
-st.title("👔 Classic Timeless Luxury – Instagram NLP Suite")
-st.markdown(
-    """
-Welcome! Use the sidebar to launch:
-
-1. **Sentence Tokenizer** – split captions into single sentences.  
-2. **Rolling Context Builder** – add two-sentence windows.
-"""
-)
-
-st.sidebar.header("🛠️ Tools")
-
-# ── Primary navigation (Streamlit ≥ 1.22) ───────────────────
-_nav_ok = True
+# ---------- sentence tokenizer (with graceful fallback) ----------
 try:
-    st.sidebar.page_link("pages/1_Instagram_Sentence_Tokenizer.py", label="Sentence Tokenizer")
-    st.sidebar.page_link("pages/2_Rolling_Context_Builder.py", label="Rolling Context Builder")
-except Exception:
-    _nav_ok = False
+    from nltk.tokenize import sent_tokenize  # requires Punkt once per session
+except ModuleNotFoundError:
+    # Minimal regex fallback – splits on ., ! or ? followed by a space / EOL.
+    def sent_tokenize(text: str):
+        return [s.strip() for s in re.split(r"(?<=[.!?])\s+", str(text).strip()) if s.strip()]
+# -----------------------------------------------------------------
 
-# ── Inline fallback for older Streamlit builds (<1.22) ───────
-if not _nav_ok:
-    tool = st.sidebar.selectbox(
-        "Select tool →",
-        ["— choose —", "Sentence Tokenizer", "Rolling Context Builder"],
-        index=0,
+st.set_page_config(page_title="Sentence Tokenizer", page_icon="✂️")
+st.title("✂️ Sentence Tokenizer (inline)")
+
+st.markdown("Upload **any** CSV; then tell me which columns are *Post ID* and *Caption / Text*. I’ll split every caption into individual sentences and give you an optional two‑sentence rolling context.")
+
+# ─────────────────────────────────────────────────────────────
+# 1 • Upload
+# ─────────────────────────────────────────────────────────────
+up = st.file_uploader("Upload CSV", type="csv")
+if not up:
+    st.stop()
+
+orig = pd.read_csv(up)
+st.subheader("Preview of uploaded data")
+st.dataframe(orig.head(), use_container_width=True)
+
+# ─────────────────────────────────────────────────────────────
+# 2 • Column mapping
+# ─────────────────────────────────────────────────────────────
+cols = orig.columns.tolist()
+
+id_col   = st.selectbox("Select the column that uniquely identifies the post", cols)
+text_col = st.selectbox("Select the column that contains the caption / text", cols)
+
+# Option: include rolling context
+roll = st.checkbox("Add two‑sentence rolling context window", value=True)
+
+# ─────────────────────────────────────────────────────────────
+# 3 • Tokenize
+# ─────────────────────────────────────────────────────────────
+if st.button("🚀 Tokenize"):
+    rows = []
+
+    for _, row in orig.iterrows():
+        post_id = row[id_col]
+        caption = str(row[text_col])
+        sents   = sent_tokenize(caption)
+
+        for idx, sent in enumerate(sents, start=1):
+            if roll:
+                start = max(0, idx - 2)  # previous + current sentence
+                rolling_ctx = " ".join(sents[start:idx])
+            else:
+                rolling_ctx = ""
+
+            rows.append({
+                "ID":            post_id,
+                "Context":       caption,
+                "Statement":     sent,
+                "Sentence ID":   idx,
+                "Rolling_Context": rolling_ctx,
+            })
+
+    out = pd.DataFrame(rows)
+
+    st.success(f"Tokenized {len(orig):,} posts into {len(out):,} sentences.")
+    st.subheader("Tokenized output (first 10 rows)")
+    st.dataframe(out.head(10), use_container_width=True)
+
+    st.download_button(
+        "📥 Download tokenized CSV",
+        out.to_csv(index=False).encode(),
+        "ig_posts_tokenized.csv",
+        "text/csv",
     )
-
-    if tool == "Sentence Tokenizer":
-        st.header("✂️ Sentence Tokenizer (inline)")
-        file = st.file_uploader("Upload ig_posts_raw.csv", type=["csv"], key="raw_inline")
-        if file:
-            df_raw = pd.read_csv(file)
-            st.info("Tokenizing…")
-            try:
-                df_tok = sentence_tokenize_df(df_raw)
-            except ValueError as e:
-                st.error(str(e))
-            else:
-                st.success(f"Extracted {len(df_tok):,} sentences.")
-                st.dataframe(df_tok.head(20))
-                st.download_button(
-                    "⬇️ Download tokenized CSV",
-                    df_tok.to_csv(index=False).encode(),
-                    "ig_posts_tokenized.csv",
-                    "text/csv",
-                )
-
-    elif tool == "Rolling Context Builder":
-        st.header("🏗️ Rolling-Context Builder (inline)")
-        file = st.file_uploader("Upload the tokenized CSV", type=["csv"], key="tok_inline")
-        if file:
-            df_tok = pd.read_csv(file)
-            st.info("Building two-sentence windows…")
-            try:
-                df_roll = add_rolling(df_tok)
-            except ValueError as e:
-                st.error(str(e))
-            else:
-                st.success("Added Rolling_Context!")
-                st.dataframe(df_roll.head(20))
-                st.download_button(
-                    "⬇️ Download with rolling context",
-                    df_roll.to_csv(index=False).encode(),
-                    "ig_posts_rolling.csv",
-                    "text/csv",
-                )
-    else:
-        st.sidebar.warning(
-            "Quick-links need Streamlit ≥ 1.22. Either upgrade Streamlit or pick a tool from the dropdown above."
-        )
