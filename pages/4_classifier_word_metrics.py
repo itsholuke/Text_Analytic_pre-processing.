@@ -1,83 +1,59 @@
-# Classifier Word Metrics – Classic Timeless Luxury Style
-# Dependencies: streamlit, pandas, nltk  •  ≈125 LOC
+# ─────────────────────────────────────────────────────────────
+# pages/4_classifier_word_metrics.py
+# Robust – runs with or without NLTK in the environment
+# ─────────────────────────────────────────────────────────────
+import re
+import pandas as pd
+import streamlit as st
 
-import streamlit as st, pandas as pd, re
-from nltk.tokenize import wordpunct_tokenize   # works without Punkt model
+# ---------- tokenizer (NLTK-aware fallback) ----------
+try:                                # use NLTK if available
+    from nltk.tokenize import wordpunct_tokenize   # no extra models needed
+except ModuleNotFoundError:         # else minimal drop-in replacement
+    def wordpunct_tokenize(text: str):
+        # Splits words and punctuation just like NLTK's version
+        return re.findall(r"\w+|[^\w\s]", text, flags=re.UNICODE)
+# -----------------------------------------------------
 
+st.set_page_config(page_title="Classifier Word Metrics", page_icon="🧮")
+st.title("🧮 Classifier Word Metrics")
 
-def main() -> None:
-    # ── Page & style ────────────────────────────────────────────────────────
-    st.set_page_config(page_title="Classic Timeless Luxury Metrics",
-                       layout="centered")
-    st.markdown(
-        "<style>h1{font-family:serif;} "
-        ".stButton>button{background:#DC143C;color:white;font-weight:600;}</style>",
-        unsafe_allow_html=True)
-    st.title("Classifier Word Metrics – Classic Timeless Luxury Style")
+csv = st.file_uploader("Upload classified_results.csv", type="csv")
+if not csv:
+    st.info("Upload a CSV created with the main classifier app.")
+    st.stop()
 
-    # ── STEP 1 • Upload CSV ─────────────────────────────────────────────────
-    files = st.file_uploader("Upload a CSV (1 row = 1 sentence)",
-                             type="csv", accept_multiple_files=False)
+df = pd.read_csv(csv)
+text_col = st.selectbox("Text column", df.columns, index=0)
 
-    if not files:
-        st.info("↖ Upload a CSV to begin.")
-        return
+# ─── choose metric source ──────────────────────────────
+pct_cols = [c for c in df.columns if c.startswith("%_")]
+mode = st.radio("Metric source", ("Existing %_ columns", "Ad-hoc keywords"))
 
-    df = pd.read_csv(files)
-    st.subheader("Preview"); st.dataframe(df.head())
+if mode == "Existing %_ columns":
+    if not pct_cols:
+        st.error("No %_ columns found. Re-run the main app first.")
+        st.stop()
 
-    # ── STEP 2 • Select columns ─────────────────────────────────────────────
-    id_col   = st.selectbox("ID column (post identifier)",   df.columns, index=0)
-    text_col = st.selectbox("Sentence / text column",        df.columns, index=1)
+    col = st.selectbox("Pick %_ column", pct_cols)
+    st.subheader("Descriptive stats")
+    st.dataframe(df[[col]].describe(), use_container_width=True)
 
-    # ── STEP 3 • Keyword dictionary ────────────────────────────────────────
-    default_kw = ("timeless, heritage, vintage, couture, "
-                  "iconic, elegant, refined, bespoke, classic")
-    kw_input = st.text_input("Classic-timeless-luxury keywords (comma-separated)",
-                             value=default_kw)
-    keywords = {k.strip().lower() for k in kw_input.split(",") if k.strip()}
-    if not keywords:
-        st.warning("⚠ Please provide at least one keyword.")
-        return
+else:  # ad-hoc keyword metric
+    kws = st.text_input("Comma-separated keywords (case-insensitive)")
+    keywords = {k.strip().lower() for k in kws.split(",") if k.strip()}
 
-    # ── STEP 4 • Generate metrics ───────────────────────────────────────────
-    if not st.button("Generate Metrics", type="primary"):
-        return
+    if keywords:
+        def pct_hits(text: str) -> float:
+            toks = [t.lower() for t in wordpunct_tokenize(str(text))]
+            return sum(t in keywords for t in toks) / max(1, len(toks))
 
-    def tok(text: str) -> list[str]:
-        words = wordpunct_tokenize(str(text).lower())
-        return [re.sub(r"\W+", "", w) for w in words if re.sub(r"\W+", "", w)]
+        df["pct_custom"] = df[text_col].apply(pct_hits)
 
-    # sentence-level flags & counts
-    df["_is_classic"]    = df[text_col].apply(lambda t: any(w in keywords for w in tok(t)))
-    df["_classic_words"] = df[text_col].apply(lambda t: sum(w in keywords for w in tok(t)))
-    df["_total_words"]   = df[text_col].apply(lambda t: len(tok(t)))
+        st.subheader("Descriptive stats")
+        st.dataframe(df[["pct_custom"]].describe(), use_container_width=True)
 
-    # post-level aggregation
-    agg = (df.groupby(id_col)
-             .agg(total_stmts   = ("_is_classic",    "size"),
-                  classic_stmts = ("_is_classic",    "sum"),
-                  total_words   = ("_total_words",   "sum"),
-                  classic_words = ("_classic_words", "sum"))
-             .reset_index())
-
-    agg["pct_classic_stmts"] = agg["classic_stmts"] / agg["total_stmts"] * 100
-    agg["pct_classic_words"] = agg["classic_words"] / agg["total_words"] * 100
-
-    # ── STEP 5 • Show & download ────────────────────────────────────────────
-    st.subheader("Post-level metrics")
-    st.dataframe(agg.head())
-
-    st.download_button("Download full CSV",
-                       agg.to_csv(index=False).encode(),
-                       file_name="classic_timeless_metrics.csv",
-                       mime="text/csv")
-
-    # tidy requirements reference
-    with st.expander("requirements.txt"):
-        st.code("streamlit\npandas\nnltk", language="text")
-
-
-# so other scripts can import main()
-if _name_ == "_main_":
-    main()
+        st.download_button("Download pct_custom.csv",
+                           df[["pct_custom"]].to_csv(index=False).encode(),
+                           "pct_custom.csv",
+                           "text/csv")
