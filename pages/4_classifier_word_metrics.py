@@ -1,6 +1,4 @@
-# ─────────────────────────────────────────────────────────────
-# pages/4_classifier_word_metrics.py
-# Robust – runs with or without NLTK in the environment
+
 # ─────────────────────────────────────────────────────────────
 import re
 import pandas as pd
