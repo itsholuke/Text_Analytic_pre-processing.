@@ -10,7 +10,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="📊 Tactic Classifier + Metrics", layout="wide")
-st.title("📊 Marketing-Tactic Text Classifier + Metrics")
+st.title("📊 Marketing‑Tactic Text Classifier + Metrics")
 
 # ─────────── seed dictionaries ────────────────────────────
 DEFAULT_TACTICS = {
@@ -189,6 +189,15 @@ if st.button("🔹 2. Compute Metrics", disabled=st.session_state.pred_df.empty)
         st.markdown("##### Precision / Recall / F1")
         st.dataframe(metrics_df.style.format({"precision":"{:.3f}","recall":"{:.3f}","f1":"{:.3f}"}))
         st.session_state.pred_df = dfp
+
+# ─────────── Download results after metrics ─────────────────
+st.markdown("### 📥 Download results")
+st.download_button(
+    "Download classified_results.csv",
+    dfp.to_csv(index=False).encode(),
+    "classified_results.csv",
+    mime="text/csv"
+)
 
 # downloads
 if st.session_state.pred_ready:
