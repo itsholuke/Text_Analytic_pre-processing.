@@ -133,19 +133,24 @@ if st.session_state.pred_ready and not st.session_state.gt_ready:
     st.subheader("Step 5‑B — Ground-truth")
     mode = st.radio("GT source", ["None","Upload CSV","Manual entry"], horizontal=True)
     if mode == "None":
-        st.warning("No ground-truth → metrics will be zeros.")
-        st.session_state.gt_ready = True
+        st.warning("No ground-truth provided — please upload CSV or use Manual entry to proceed.")
+        st.session_state.gt_ready = False
     elif mode == "Upload CSV":
-        gtf = st.file_uploader("Upload GT CSV", type="csv", key="gtup")
-        if gtf:
-            gtd = pd.read_csv(gtf)
+        # allow any CSV column as ground truth
+        gt_file = st.file_uploader("Upload GT CSV", type="csv", key="gt_csv")
+        if gt_file:
+            gtd = pd.read_csv(gt_file)
             st.session_state.gt_df = gtd
-            cols = [c for c in gtd.columns if c!="ID"]
-            st.session_state.gt_col = st.selectbox("Select GT column", cols, index=cols.index("mode_researcher") if "mode_researcher" in cols else 0)
+            # let user select any column
+            cols = list(gtd.columns)
+            st.session_state.gt_col = st.selectbox(
+                "Select ground-truth column", cols,
+                index=cols.index("mode_researcher") if "mode_researcher" in cols else 0
+            )
             st.session_state.gt_ready = True
-            st.success("GT loaded.")
+            st.success("Ground-truth CSV loaded; column '" + st.session_state.gt_col + "' selected.")
         else:
-            st.info("Upload a GT CSV or choose 'None' to proceed.")
+            st.info("Upload a CSV file to select your ground-truth column.")
             st.stop()
     else:  # Manual entry
         flag = f"{tactic}_flag_gt"
