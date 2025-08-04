@@ -1,9 +1,17 @@
-# streamlit_app.py  –  FULL VERSION with tactic-aware Step 4  (robust)
-import streamlit as st
-import pandas as pd
-import re, ast
+# pages/3_Refinement_Classifier_Creation.py
+# --------------------------------------------------------------------
+# Refinement Classifier Creation – tactic dictionary + metrics
+# --------------------------------------------------------------------
+# • Upload a CSV that already contains your ground‑truth 0/1 column(s)
+# • Paste / edit a Python dict that maps **one tactic** → list of keywords
+# • Classify every row, show frequency table, bar‑chart (if matplotlib is
+#   installed), and precision / recall / F1 when a single binary column
+#   is chosen.
+# • Safe: skips chart gracefully if matplotlib is missing.
+# --------------------------------------------------------------------
+import re, ast, pandas as pd, streamlit as st
 
-# ── optional plotting (auto-skip if matplotlib missing) ──────────────
+# ── optional plotting (auto‑skip if matplotlib missing) ───────────────
 try:
     import matplotlib.pyplot as plt
     HAS_PLOT = True
@@ -11,146 +19,74 @@ except ModuleNotFoundError:
     HAS_PLOT = False
 # ─────────────────────────────────────────────────────────────────────
 
-st.set_page_config(page_title="Marketing-Tactic Text Classifier", page_icon="📊")
-st.title("📊 Marketing-Tactic Text Classifier")
+st.set_page_config(page_title="Refinement Classifier Creation", page_icon="🛠️")
+st.title("🛠️ Refinement Classifier Creation")
 
-# ───────── STEP 1 – choose tactic ─────────
-default_tactics = {
-    "urgency_marketing":  ["now","today","limited","hurry","exclusive"],
-    "social_proof":       ["bestseller","popular","trending","recommended"],
-    "discount_marketing": ["sale","discount","deal","free","offer"],
-    "Classic_Timeless_Luxury_style": [
-        "elegance","heritage","sophistication","refined","timeless","grace",
-        "legacy","opulence","bespoke","tailored","understated","prestige",
-        "quality","craftsmanship","heirloom","classic","tradition","iconic",
-        "enduring","rich","authentic","luxury","fine","pure","exclusive",
-        "elite","mastery","immaculate","flawless","distinction","noble",
-        "chic","serene","clean","minimal","poised","balanced","eternal",
-        "neutral","subtle","grand","timelessness","tasteful","quiet","sublime",
-    ]
-}
-tactic = st.selectbox("🎯 Step 1 — choose a tactic", list(default_tactics))
-st.write(f"Chosen tactic: *{tactic}*")
+# ---------- upload ---------------------------------------------------
+upload = st.file_uploader("📁 Upload CSV", type="csv")
+if upload is None:
+    st.stop()
 
-# ---------- helpers --------------------------------------------------
-def clean(txt: str) -> str:
-    return re.sub(r"[^a-zA-Z0-9\\s]", "", str(txt).lower())
+df = pd.read_csv(upload)
+st.subheader("Preview")
+st.dataframe(df.head(), use_container_width=True)
 
-def classify(txt: str, d):
-    toks = txt.split()
-    return [c for c, terms in d.items() if any(w in toks for w in terms)] \
-           or ["uncategorized"]
+text_col = st.selectbox("Text column:", df.columns)
 
-def safe_read_csv(f):
-    """Try utf-8, utf-8-sig, latin1, cp1252 encodings until one works."""
-    for enc in ("utf-8", "utf-8-sig", "latin1", "cp1252"):
-        try:
-            f.seek(0)
-            return pd.read_csv(f, encoding=enc)
-        except UnicodeDecodeError:
-            continue
-    raise UnicodeDecodeError("common encodings failed", b"", 0, 0, "")
-# ---------------------------------------------------------------------
+# auto‑detect 0/1 columns
+bin_cols = [c for c in df.columns if set(df[c].dropna().unique()) <= {0, 1}]
+gt_col = st.selectbox("Ground‑truth 0/1 column (optional):", ["<none>"] + bin_cols)
 
-# session defaults
-for k in ("dict_ready","dictionary","top_words","df"):
-    st.session_state.setdefault(k, None)
+example = '{"urgency_marketing": ["now", "today", "hurry"]}'
+user_dict = st.text_area("Paste tactic dictionary (ONE key)", example, height=140)
+try:
+    tactic_dict = {k: set(map(str.lower, v)) for k, v in ast.literal_eval(user_dict).items()}
+    if len(tactic_dict) != 1:
+        raise ValueError("Provide exactly ONE tactic in the dict.")
+except Exception as e:
+    st.error(f"Dict parse error → {e}")
+    st.stop()
 
-# ───────── STEP 2 – upload CSV ───────────
-upload = st.file_uploader("📁 Step 2 — upload CSV", type="csv")
+tactic_name, keywords = next(iter(tactic_dict.items()))
 
-if upload:
-    try:
-        df = safe_read_csv(upload)
-    except UnicodeDecodeError as e:
-        st.error(f"Cannot decode CSV: {e}")
-        st.stop()
+# ---------- helper functions ----------------------------------------
+clean = lambda t: re.sub(r"[^a-zA-Z0-9\s]", "", str(t).lower())
+classify_flag = lambda toks: int(any(w in toks for w in keywords))
+# --------------------------------------------------------------------
 
-    st.dataframe(df.head(), use_container_width=True)
-    text_col = st.selectbox("📋 Step 3 — text column", df.columns)
+if st.button("🚀 Run"):
+    with st.spinner("Classifying…"):
+        df["_clean"]   = df[text_col].apply(clean)
+        df["pred_flag"] = df["_clean"].apply(lambda x: classify_flag(x.split()))
 
-    # ----- Step 4 — generate / refine dictionary -----
-    if st.button("🧠 Step 4 — Generate Keywords & Dictionary"):
-        with st.spinner("Cleaning & mining keywords…"):
-            df["cleaned"] = df[text_col].apply(clean)
+    freq = df["pred_flag"].value_counts().rename(index={0: "No", 1: "Yes"})
+    st.subheader("Predicted tactic flag frequency")
+    st.dataframe(freq.rename("Rows"))
 
-            base_terms = set(default_tactics[tactic])
-            df["row_matches"] = df["cleaned"].apply(
-                lambda s: any(w in s.split() for w in base_terms)
-            )
-            pos_df = df[df["row_matches"]]
+    # bar‑chart if matplotlib available
+    if HAS_PLOT and not freq.empty:
+        fig, ax = plt.subplots()
+        freq.plot.bar(ax=ax)
+        ax.set_ylabel("Rows"); ax.set_title("Predicted tactic flag")
+        st.pyplot(fig)
+    elif not HAS_PLOT:
+        st.info("Matplotlib not installed – skipping bar chart.")
 
-            stop = {"the","is","in","on","and","a","for","you","i","are","of",
-                    "your","to","my","with","it","me","this","that","or"}
+    # metrics if ground‑truth chosen
+    if gt_col != "<none>":
+        y_true = df[gt_col].astype(int)
+        y_pred = df["pred_flag"]
+        tp = int(((y_true == 1) & (y_pred == 1)).sum())
+        fp = int(((y_true == 0) & (y_pred == 1)).sum())
+        fn = int(((y_true == 1) & (y_pred == 0)).sum())
+        prec = tp / (tp + fp) if tp + fp else 0.0
+        rec  = tp / (tp + fn) if tp + fn else 0.0
+        f1   = 2 * prec * rec / (prec + rec) if prec + rec else 0.0
+        st.subheader("Classification metrics")
+        st.metric("Precision", f"{prec:.3f}")
+        st.metric("Recall",    f"{rec:.3f}")
+        st.metric("F1‑score",  f"{f1:.3f}")
 
-            if pos_df.empty:
-                contextual_terms, contextual_freq = [], pd.Series(dtype=int)
-                st.warning("No rows contained the base terms for this tactic.")
-            else:
-                words = " ".join(pos_df["cleaned"]).split()
-                freq  = pd.Series(words).value_counts()
-                contextual_terms = [
-                    w for w in freq.index if w not in stop and w not in base_terms
-                ][:30]
-                contextual_freq = freq.loc[contextual_terms]
-
-            auto_dict = {tactic: sorted(base_terms.union(contextual_terms))}
-
-        st.subheader("Top contextual keywords (filtered)")
-        st.dataframe(contextual_freq.rename("Freq")) \
-            if not contextual_freq.empty else st.write("-- none found --")
-
-        dict_txt = st.text_area("✏ Edit dictionary (Python dict)", value=str(auto_dict), height=160)
-        try:
-            st.session_state.dictionary = ast.literal_eval(dict_txt)
-            st.success("Dictionary saved.")
-        except Exception:
-            st.error("Bad format → using auto dict.")
-            st.session_state.dictionary = auto_dict
-
-        st.session_state.df        = df
-        st.session_state.top_words = contextual_freq
-        st.session_state.dict_ready = True
-
-    # ----- Step 5 — run classifier -----
-    if st.session_state.dict_ready and st.button("🧪 Step 5 — Run Classification"):
-        df         = st.session_state.df.copy()
-        top_words  = st.session_state.top_words
-        dictionary = st.session_state.dictionary
-
-        with st.spinner("Classifying…"):
-            df["categories"] = df["cleaned"].apply(lambda x: classify(x, dictionary))
-            df["tactic_flag"] = df["categories"].apply(lambda cats: int(tactic in cats))
-
-        counts = pd.Series(
-            [c for cats in df["categories"] for c in cats]
-        ).value_counts()
-
-        st.subheader("📊 Category frequencies")
-        st.dataframe(counts.rename("Posts"))
-
-        st.subheader("🔑 Top contextual keywords")
-        st.dataframe(top_words.rename("Freq")) if not top_words.empty \
-            else st.write("-- none to display --")
-
-        if HAS_PLOT and not top_words.empty:
-            fig, ax = plt.subplots(figsize=(10,4))
-            top_words.sort_values(ascending=False).plot.bar(ax=ax)
-            ax.set_title("Top contextual keyword frequencies")
-            st.pyplot(fig)
-        elif not HAS_PLOT:
-            st.info("Matplotlib not installed – skipping bar chart.")
-
-        # downloads
-        st.download_button("📥 classified_results.csv",
-                           df.to_csv(index=False).encode(),
-                           "classified_results.csv", "text/csv")
-        st.download_button("📥 category_frequencies.csv",
-                           counts.to_csv().encode(),
-                           "category_frequencies.csv", "text/csv")
-        if not top_words.empty:
-            st.download_button("📥 top_keywords.csv",
-                               top_words.to_csv().encode(),
-                               "top_keywords.csv", "text/csv")
-else:
-    st.info("Upload a CSV to begin.")
+    st.download_button("💾 Download classified CSV",
+                       df.drop(columns="_clean").to_csv(index=False).encode(),
+                       "refined_results.csv", "text/csv")
