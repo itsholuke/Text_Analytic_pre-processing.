@@ -174,14 +174,13 @@ elif not st.session_state.gt_ready:
 else:
     if st.button("🔹 Compute Metrics"):
         dfp = st.session_state.pred_df.copy()
-        # integrate ground-truth if provided via CSV or manual
+                # integrate ground-truth if provided via CSV or manual
         if st.session_state.gt_df is not None and not st.session_state.gt_df.empty:
             gt = st.session_state.gt_df.copy()
-            # expect gt has ID and true_label columns
             if "true_label" in gt.columns:
-                dfp = dfp.merge(gt[["ID","true_label"]], on="ID", how="left", suffixes=("","_gt"))
-                dfp["true_label"] = dfp["true_label_gt"].combine_first(dfp["true_label"])
-                dfp.drop(columns=["true_label_gt"], inplace=True)
+                # drop any existing placeholder true_label then merge actual GT
+                dfp = dfp.drop(columns=["true_label"], errors="ignore")
+                dfp = dfp.merge(gt[["ID","true_label"]], on="ID", how="left")
         # ensure 'true_label' exists
         if "true_label" not in dfp.columns or dfp["true_label"].isna().all():
             st.warning("No ground-truth labels found → cannot compute metrics.")
