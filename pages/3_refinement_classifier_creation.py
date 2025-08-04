@@ -144,57 +144,7 @@ elif mode == "Manual entry" and st.session_state.pred_ready:
     flag = f"{tactic}_flag_gt"
     prev = "_snippet_"
     df_e = st.session_state.pred_df.copy()
-    df_e[flag] = pd.to_numeric(df_e.get(flag, 0), errors="coerce").fillna(0).astype(int)
-    df_e[prev] = df_e.get(prev, df_e[text_col].astype(str).str.slice(0,120))
-    edited = st.data_editor(df_e[["ID", prev, flag]], use_container_width=True, height=600, key="edit_gt")
-    st.session_state.pred_df[flag] = pd.to_numeric(edited[flag], errors="coerce").fillna(0).astype(int)
-    st.session_state.pred_df["true_label"] = st.session_state.pred_df[flag].apply(lambda x: [tactic] if x else [])
-    st.session_state.gt_ready = True
-# None: skip
-
-# ─────────── compute metrics ──────────────────────────────
-if st.button("🔹 2. Compute Metrics", disabled=st.session_state.pred_df.empty):
-    dfp = st.session_state.pred_df.copy()
-    if st.session_state.gt_ready and st.session_state.gt_df is not None and not st.session_state.gt_df.empty:
-        gt = st.session_state.gt_df.copy()
-        col = st.session_state.gt_col
-        if col in gt.columns:
-            if pd.api.types.is_numeric_dtype(gt[col]) or gt[col].dropna().isin([0,1]).all():
-                dfp = dfp.merge(gt[["ID", col]], on="ID", how="left")
-                dfp["true_label"] = dfp[col].apply(lambda x: [tactic] if safe_bool(x) else [])
-            else:
-                dfp = dfp.merge(gt[["ID", col]], on="ID", how="left")
-                dfp["true_label"] = dfp[col].apply(lambda x: [tactic] if str(x)==tactic else [])
-        else:
-            st.error(f"Column '{col}' not found in GT file.")
-            st.stop()
-    if "true_label" not in dfp.columns or dfp["true_label"].isna().all():
-        st.warning("No ground-truth labels present → cannot compute metrics.")
-    else:
-        dfp["gt_list"] = dfp["true_label"].apply(to_list)
-        dfp["pred_list"] = dfp["categories"]
-        rows = []
-        for tac in st.session_state.dictionary:
-            dfp["pred_flag"] = dfp["pred_list"].apply(lambda lst: tac in lst)
-            dfp["gt_flag"] = dfp["gt_list"].apply(lambda lst: tac in lst)
-            TP = int((dfp.pred_flag & dfp.gt_flag).sum())
-            FP = int((dfp.pred_flag & ~dfp.gt_flag).sum())
-            FN = int((~dfp.pred_flag & dfp.gt_flag).sum())
-            prec = TP/(TP+FP) if TP+FP else 0.0
-            rec = TP/(TP+FN) if TP+FN else 0.0
-            f1 = 2*prec*rec/(prec+rec) if prec+rec else 0.0
-            rows.append({"tactic":tac,"TP":TP,"FP":FP,"FN":FN,
-                         "precision":prec,"recall":rec,"f1":f1})
-        metrics_df = pd.DataFrame(rows).set_index("tactic")
-        st.markdown("##### Precision / Recall / F1")
-        st.dataframe(metrics_df.style.format({"precision":"{:.3f}","recall":"{:.3f}","f1":"{:.3f}"}))
-        st.session_state.pred_df = dfp
-
-# ─────────── Download results after metrics ─────────────────
-st.markdown("### 📥 Download results")
-st.download_button(
-    "Download classified_results.csv",
-    st.session_state.pred_df.to_csv(index=False).encode(),
-    "classified_results.csv",
-    mime="text/csv"
-)
+    # ensure the flag column exists and is numeric
+        if flag not in df_e.columns:
+            df_e[flag] = 0
+        df_e[flag] = pd.to_numeric(df_e[flag], errors="coerce").fillna(0).astype(int)
