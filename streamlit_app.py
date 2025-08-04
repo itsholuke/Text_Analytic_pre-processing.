@@ -6,13 +6,13 @@
 # -------------------------------------------------------------
 import streamlit as st
 
-st.set_page_config(page_title="Text-Analytic Project by Group A (Joseph, Jennifer, Basant, & Ismail): Pre-processing Suite", page_icon="🔧")
+st.set_page_config(page_title="Text-Analytic Project by Group A (Joseph, Jennifer, Basant, & Ismail)", page_icon="🔧")
 
-st.title("🔧 Text-Analytic Project by Group A (Joseph, Jennifer, Basant, & Ismail): Pre-processing Suite")
+st.title("🔧 Text-Analytic Project by Group A (Joseph, Jennifer, Basant, & Ismail)")
 
 st.markdown(
     """
-    Welcome! Use the sidebar to run the two-step pipeline:
+    Welcome! Use the sidebar to run the five-step pipeline:
 
     1. **Sentence Tokenizer** – split each caption into individual sentences  
        *(downloads **_tokenised.csv**).*  
@@ -28,4 +28,5 @@ st.markdown(
 
 # You could add a logo or additional instructions here if desired.
 # Otherwise this page is just an informational landing screen.
+
 
