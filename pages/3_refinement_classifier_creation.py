@@ -52,15 +52,17 @@ def to_list(x):
     return []
 
 def safe_bool(x):
+    # evaluates truthy values OR the tactic string itself
     if isinstance(x, (int, float)):
         return bool(int(x))
     if isinstance(x, str):
         return x.strip().lower() in {"1", "true", "yes", tactic.lower()}
     return False
 
-# ───────────────────────── sidebar ‑ tactic picker ─────────
+# ─────────── STEP 0 – choose tactic ────────────────────────
+st.header("Step 0 — Choose tactic")
 
-tactic = st.sidebar.selectbox("🎯 Tactic", list(DEFAULT_TACTICS.keys()))
+tactic = st.selectbox("🎯 Select marketing tactic", list(DEFAULT_TACTICS.keys()), key="tactic_choice")
 
 # ───────────────────────── session init ────────────────────
 
@@ -168,9 +170,7 @@ if mode == "Upload CSV":
     if gt_file:
         st.session_state.gt_df = pd.read_csv(gt_file)
         st.success("Ground‑truth file loaded.")
-        # let user choose which column contains the label / flag
         cols = st.session_state.gt_df.columns.tolist()
-        # preselect previously chosen or guess a likely flag
         preselect = st.session_state.get("gt_flag_col") or next((c for c in cols if c.endswith("_flag") or c.lower().startswith("mode")), cols[0])
         st.session_state.gt_flag_col = st.selectbox("Select ground‑truth column", cols, index=cols.index(preselect))
 
@@ -187,56 +187,4 @@ elif mode == "Manual entry":
         if preview not in df_edit.columns:
             df_edit[preview] = df_edit[text_col].astype(str).str.slice(0, 120)
         edited = st.data_editor(
-            df_edit[["ID", preview, flag_col]],
-            column_config={
-                flag_col: st.column_config.NumberColumn(label=f"1 = *{tactic}*   0 = not", min_value=0, max_value=1, step=1),
-                preview: st.column_config.TextColumn(label="Text (first 120 chars)")
-            }, height=650, use_container_width=True, num_rows="dynamic")
-        st.session_state.pred_df[flag_col] = pd.to_numeric(edited[flag_col], errors="coerce").fillna(0).astype("int64")
-        st.session_state.pred_df["true_label"] = st.session_state.pred_df[flag_col].apply(lambda x: [tactic] if x == 1 else [])
-
-# ───────── STEP 5 – compute metrics ────────────────────────
-
-st.header("Step 5 — Compute metrics")
-
-if st.button("🔹 Compute Metrics", disabled=st.session_state.pred_df.empty):
-    df_pred = st.session_state.pred_df.copy()
-
-    # merge uploaded gt if present
-    if not st.session_state.gt_df.empty and st.session_state.gt_flag_col:
-        gt = st.session_state.gt_df.copy()
-        col = st.session_state.gt_flag_col
-        if col in gt.columns:
-            # numeric / boolean → treat as flag
-            if gt[col].apply(lambda x: isinstance(x, (int, float)) or safe_bool(x)).all():
-                gt["true_label"] = gt[col].apply(lambda x: [tactic] if safe_bool(x) else [])
-            else:  # text labels / categories
-                gt["true_label"] = gt[col].apply(lambda x: [tactic] if str(x).strip().lower() == tactic.lower() else [])
-        df_pred = df_pred.merge(gt[["ID", "true_label"]], on="ID", how="left", suffixes=("","_y"))
-        if "true_label_y" in df_pred.columns:
-            df_pred["true_label"] = df_pred["true_label_y"].combine_first(df_pred["true_label"])
-            df_pred.drop(columns=["true_label_y"], inplace=True)
-
-    if "true_label" not in df_pred.columns or df_pred["true_label"].isna().all():
-        st.warning("No ground‑truth labels present → cannot compute metrics.")
-        st.stop()
-
-    df_pred["_gt_list_"] = df_pred["true_label"].apply(to_list)
-    df_pred["_pred_list_"] = df_pred["categories"]
-
-    rows = []
-    for tac in st.session_state.dictionary.keys():
-        df_pred["_pred_flag_"] = df_pred["_pred_list_"].apply(lambda lst: tac in lst)
-        df_pred["_gt_flag_"] = df_pred["_gt_list_"].apply(lambda lst: tac in lst)
-        TP = int((df_pred["_pred_flag_"] & df_pred["_gt_flag_"]).sum())
-        FP = int((df_pred["_pred_flag_"] & ~df_pred["_gt_flag_"]).sum())
-        FN = int((~df_pred["_pred_flag_"] & df_pred["_gt_flag_"]).sum())
-        prec = TP / (TP + FP) if TP + FP else 0.0
-        rec = TP / (TP + FN) if TP + FN else 0.0
-        f1 = 2*prec*rec / (prec + rec) if prec + rec else 0.0
-        rows.append({"tactic": tac, "TP": TP, "FP": FP, "FN": FN, "precision": prec, "recall": rec, "f1": f1})
-
-    metrics_df = pd.DataFrame(rows).set_index("tactic")
-    st.markdown("##### Precision / Recall / F1")
-    st.dataframe(metrics_df.style.format({"precision": "{:.3f}", "recall": "{:.3f}", "f1": "{:.3f}"}))
-    st.session_state.pred
+            df
