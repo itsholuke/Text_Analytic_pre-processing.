@@ -1,9 +1,17 @@
-# pages/3_correlation_likes_comments.py
+# pages/6_Correlation_Likes_Comments.py
 # --------------------------------------------------------------------
-# Correlation Explorer – classic_timeless_luxury  ×  likes / comments
+# 6 • Correlation Explorer – classic_timeless_luxury × likes & comments
+# --------------------------------------------------------------------
+# • Upload a CSV that already contains
+#       classic_timeless_luxury  (0/1 flag)
+#       likes                    (numeric)
+#       comments                 (numeric)
+# • Shows Pearson correlation matrix and optional scatterplot
+# • Download correlation table as CSV
 # --------------------------------------------------------------------
 import pandas as pd
 import streamlit as st
+from pathlib import Path
 
 try:
     import matplotlib.pyplot as plt
@@ -11,32 +19,41 @@ try:
 except ModuleNotFoundError:
     HAS_PLOT = False
 
-st.set_page_config(page_title="Correlation: Timeless Luxury vs Likes/Comments",
-                   page_icon="📈")
-st.title("📈 Correlation Explorer")
+# ── robust CSV reader -------------------------------------------------
+ENCODINGS = ("utf-8", "utf-8-sig", "latin1", "cp1252")
+
+def safe_read_csv(file_obj) -> pd.DataFrame:
+    """Try common encodings until one works."""
+    for enc in ENCODINGS:
+        try:
+            file_obj.seek(0)
+            return pd.read_csv(file_obj, encoding=enc)
+        except UnicodeDecodeError:
+            continue
+    raise UnicodeDecodeError("unable to decode with utf-8 / latin-1 / cp1252", b"", 0, 0, "")
+
+# ──────────────────────────────────────────────────────────────────────
+st.set_page_config(page_title="6 Correlation Likes Comments", page_icon="📈")
+st.title("📈 Correlation – Timeless Luxury vs Likes & Comments")
 
 st.markdown(
     """
-    *Upload a CSV that already contains a **binary** column named
-    `classic_timeless_luxury` and numeric columns `likes` and `comments`.
-    I’ll compute the Pearson correlation between the tactic and the
-    engagement metrics.*"""
+    **Required columns (case-sensitive)** in your CSV:
+
+    * `classic_timeless_luxury` → binary 0 / 1 flag  
+    * `likes`                   → numeric  
+    * `comments`                → numeric
+    """
 )
 
 csv = st.file_uploader("📁 Upload CSV", type="csv")
 if csv is None:
     st.stop()
 
-# safer read (handles utf-8 / latin-1 etc.)
-for enc in ("utf-8", "utf-8-sig", "latin1", "cp1252"):
-    try:
-        csv.seek(0)
-        df = pd.read_csv(csv, encoding=enc)
-        break
-    except UnicodeDecodeError:
-        continue
-else:
-    st.error("Unable to decode file with common encodings.")
+try:
+    df = safe_read_csv(csv)
+except UnicodeDecodeError as err:
+    st.error(f"Cannot decode file: {err}")
     st.stop()
 
 st.subheader("Preview")
@@ -47,24 +64,27 @@ if not required.issubset(df.columns):
     st.error(f"CSV must contain columns: {', '.join(required)}")
     st.stop()
 
-# ensure correct dtypes
+# convert and clean
 df["classic_timeless_luxury"] = df["classic_timeless_luxury"].astype(float)
-df["likes"]     = pd.to_numeric(df["likes"], errors="coerce")
-df["comments"]  = pd.to_numeric(df["comments"], errors="coerce")
+df["likes"]    = pd.to_numeric(df["likes"],    errors="coerce")
+df["comments"] = pd.to_numeric(df["comments"], errors="coerce")
+clean = df.dropna(subset=required)
 
-st.markdown("### Correlation table")
-corr = df[["classic_timeless_luxury", "likes", "comments"]].corr().round(3)
+st.markdown("### Correlation matrix")
+corr = clean[list(required)].corr().round(3)
 st.dataframe(corr, use_container_width=True)
 
-st.download_button("💾 Download correlation CSV",
-                   corr.to_csv().encode(),
-                   "correlation_table.csv",
-                   "text/csv")
+st.download_button(
+    "💾 Download correlation CSV",
+    corr.to_csv().encode(),
+    file_name=f"{Path(csv.name).stem}_correlation.csv",
+    mime="text/csv",
+)
 
 if HAS_PLOT:
     metric = st.selectbox("Scatterplot against:", ("likes", "comments"))
     fig, ax = plt.subplots()
-    ax.scatter(df["classic_timeless_luxury"], df[metric], alpha=0.5)
+    ax.scatter(clean["classic_timeless_luxury"], clean[metric], alpha=0.45)
     ax.set_xlabel("classic_timeless_luxury (0/1)")
     ax.set_ylabel(metric)
     ax.set_title(f"{metric} vs tactic flag")
