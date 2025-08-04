@@ -151,7 +151,7 @@ elif choice=="Manual entry" and st.session_state.pred_ready:
     st.session_state.gt_ready = True
 
 # ---------- compute metrics ----------
-if st.button("🔹 2. Compute Metrics", disabled=not (st.session_state.pred_ready and st.session_state.gt_ready)):
+if st.button("🔹 2. Compute Metrics", disabled=not st.session_state.pred_ready):
     dfp = st.session_state.pred_df.copy()
 
     # merge uploaded ground‑truth if present
