@@ -6,9 +6,9 @@
 # -------------------------------------------------------------
 import streamlit as st
 
-st.set_page_config(page_title="Text-analytic Pre-processing Suite", page_icon="🔧")
+st.set_page_config(page_title="Text-Analytic Project by Group A (Joseph, Jennifer, Basant, & Ismail): Pre-processing Suite", page_icon="🔧")
 
-st.title("🔧 Text-analytic Pre-processing Suite")
+st.title("🔧 Text-Analytic Project by Group A (Joseph, Jennifer, Basant, & Ismail): Pre-processing Suite")
 
 st.markdown(
     """
@@ -28,3 +28,4 @@ st.markdown(
 
 # You could add a logo or additional instructions here if desired.
 # Otherwise this page is just an informational landing screen.
+
