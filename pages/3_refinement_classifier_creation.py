@@ -1,19 +1,21 @@
-# streamlit_app.py  –  FULL VERSION with tactic-aware Step 4
 import streamlit as st
 import pandas as pd
 import re, ast
 
-# ── optional plotting (auto-skip if matplotlib missing) ─────
+# ── optional plotting (auto-skip if matplotlib missing) ──────────────
 try:
     import matplotlib.pyplot as plt
     HAS_PLOT = True
 except ModuleNotFoundError:
     HAS_PLOT = False
-# ────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────
 
+st.set_page_config(page_title="Marketing-Tactic Text Classifier",
+                   page_icon="📊",
+                   layout="wide")
 st.title("📊 Marketing-Tactic Text Classifier")
 
-# ───────── STEP 1 – choose tactic ─────────
+# ───────── Step 1 – choose tactic ─────────
 default_tactics = {
     "urgency_marketing":  ["now","today","limited","hurry","exclusive"],
     "social_proof":       ["bestseller","popular","trending","recommended"],
@@ -31,63 +33,65 @@ default_tactics = {
 tactic = st.selectbox("🎯 Step 1 — choose a tactic", list(default_tactics))
 st.write(f"Chosen tactic: *{tactic}*")
 
-# ───────── STEP 2 – upload CSV ────────────
-file = st.file_uploader("📁 Step 2 — upload CSV", type="csv")
+# ───────── Step 2 – upload CSV ────────────
+upload = st.file_uploader("📁 Step 2 — upload CSV", type="csv")
 
 # ---------- helpers -----------------------
 def clean(t): return re.sub(r"[^a-zA-Z0-9\\s]", "", str(t).lower())
-def classify(txt, d):                # unchanged
-    toks = txt.split()
-    return [c for c,terms in d.items() if any(w in toks for w in terms)] \
+
+def classify(toks, d):
+    return [k for k,terms in d.items() if any(w in toks for w in terms)] \
            or ["uncategorized"]
 # ------------------------------------------
 
-# session defaults
+# Streamlit session defaults
 for k in ("dict_ready","dictionary","top_words","df"):
     st.session_state.setdefault(k, None)
 
 # ───────────────────────────────────────────
-# MAIN APP LOGIC
+# Main logic
 # ───────────────────────────────────────────
-if file:
-    df = pd.read_csv(file)
+if upload:
+    df = pd.read_csv(upload)
     st.dataframe(df.head())
 
-    text_col = st.selectbox("📋 Step 3 — select text column", df.columns)
+    text_col = st.selectbox("📋 Step 3 — text column", df.columns)
 
-    # ----- Step 4 — generate / refine dictionary -----
+    # Step 4 – generate / refine dictionary
     if st.button("🧠 Step 4 — Generate Keywords & Dictionary"):
         df["cleaned"] = df[text_col].apply(clean)
 
         base_terms = set(default_tactics[tactic])
-        df["row_matches_tactic"] = df["cleaned"].apply(
+        df["row_matches"] = df["cleaned"].apply(
             lambda s: any(w in s.split() for w in base_terms)
         )
-        pos_df = df[df["row_matches_tactic"]]
+        pos_df = df[df["row_matches"]]
 
-        stop_words = {"the","is","in","on","and","a","for","you","i","are","of",
-                      "your","to","my","with","it","me","this","that","or"}
+        stop = {"the","is","in","on","and","a","for","you","i","are","of",
+                "your","to","my","with","it","me","this","that","or"}
 
         if pos_df.empty:
             contextual_terms, contextual_freq = [], pd.Series(dtype=int)
-            st.warning("No rows contained the base terms for this tactic.")
+            st.warning("No rows contain tactic seed terms.")
         else:
             words = " ".join(pos_df["cleaned"]).split()
             freq  = pd.Series(words).value_counts()
             contextual_terms = [
-                w for w in freq.index if w not in stop_words and w not in base_terms
+                w for w in freq.index
+                if w not in stop and w not in base_terms
             ][:30]
             contextual_freq = freq.loc[contextual_terms]
 
         auto_dict = {tactic: sorted(base_terms.union(contextual_terms))}
 
-        st.subheader("Top contextual keywords (filtered)")
-        if not contextual_freq.empty:
-            st.dataframe(contextual_freq.rename("Frequency"))
-        else:
-            st.write("-- none found --")
+        st.subheader("Top contextual keywords")
+        st.dataframe(contextual_freq.rename("Freq")) if not contextual_freq.empty \
+            else st.write("-- none found --")
 
-        dict_text = st.text_area("✏ Edit dictionary", value=str(auto_dict), height=160)
+        dict_text = st.text_area(
+            "✏ Edit dictionary (Python dict)",
+            value=str(auto_dict), height=150
+        )
         try:
             st.session_state.dictionary = ast.literal_eval(dict_text)
             st.success("Dictionary saved.")
@@ -99,16 +103,24 @@ if file:
         st.session_state.top_words = contextual_freq
         st.session_state.dict_ready = True
 
-    # ----- Step 5 — run classifier -----
-    if st.session_state.dict_ready and st.button("🧪 Step 5 — Run Classification"):
+    # Step 5 – run classifier
+    if st.session_state.dict_ready and \
+       st.button("🧪 Step 5 — Run Classification"):
+
         df         = st.session_state.df.copy()
         top_words  = st.session_state.top_words
         dictionary = st.session_state.dictionary
 
-        df["categories"] = df["cleaned"].apply(lambda x: classify(x, dictionary))
-        df["tactic_flag"] = df["categories"].apply(lambda cats: int(tactic in cats))
+        df["categories"] = df["cleaned"].apply(
+            lambda x: classify(x.split(), dictionary)
+        )
+        df["tactic_flag"] = df["categories"].apply(
+            lambda cats: int(tactic in cats)
+        )
 
-        counts = pd.Series([c for cats in df["categories"] for c in cats]).value_counts()
+        counts = pd.Series(
+            [c for cats in df["categories"] for c in cats]
+        ).value_counts()
 
         st.subheader("📊 Category frequencies")
         st.dataframe(counts.rename("Posts"))
@@ -117,7 +129,7 @@ if file:
         st.dataframe(top_words.rename("Freq")) if not top_words.empty \
             else st.write("-- none to display --")
 
-        # bar-chart only if matplotlib installed
+        # Bar-chart only if matplotlib installed & data exists
         if HAS_PLOT and not top_words.empty:
             fig, ax = plt.subplots(figsize=(10,4))
             top_words.sort_values(ascending=False).plot.bar(ax=ax)
