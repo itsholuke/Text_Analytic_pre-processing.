@@ -1,38 +1,27 @@
-# pages/6_Correlation_Likes_Comments.py
-# --------------------------------------------------------------------
-# 6 • Correlation Explorer – classic_timeless_luxury × likes & comments
-# --------------------------------------------------------------------
-# • Upload a CSV that already contains
-#       classic_timeless_luxury  (0/1 flag)
-#       likes                    (numeric)
-#       comments                 (numeric)
-# • Shows Pearson correlation matrix and optional scatterplot
-# • Download correlation table as CSV
 # --------------------------------------------------------------------
 import pandas as pd
 import streamlit as st
 from pathlib import Path
 
+# ---------- robust CSV reader (tries common encodings) ---------------
+ENCODINGS = ("utf-8", "utf-8-sig", "latin1", "cp1252")
+def safe_read_csv(fileobj) -> pd.DataFrame:
+    for enc in ENCODINGS:
+        try:
+            fileobj.seek(0)
+            return pd.read_csv(fileobj, encoding=enc)
+        except UnicodeDecodeError:
+            continue
+    raise UnicodeDecodeError("All tried encodings failed", b"", 0, 0, "")
+
+# ---------- optional plotting ----------------------------------------
 try:
     import matplotlib.pyplot as plt
     HAS_PLOT = True
 except ModuleNotFoundError:
     HAS_PLOT = False
+# ---------------------------------------------------------------------
 
-# ── robust CSV reader -------------------------------------------------
-ENCODINGS = ("utf-8", "utf-8-sig", "latin1", "cp1252")
-
-def safe_read_csv(file_obj) -> pd.DataFrame:
-    """Try common encodings until one works."""
-    for enc in ENCODINGS:
-        try:
-            file_obj.seek(0)
-            return pd.read_csv(file_obj, encoding=enc)
-        except UnicodeDecodeError:
-            continue
-    raise UnicodeDecodeError("unable to decode with utf-8 / latin-1 / cp1252", b"", 0, 0, "")
-
-# ──────────────────────────────────────────────────────────────────────
 st.set_page_config(page_title="6 Correlation Likes Comments", page_icon="📈")
 st.title("📈 Correlation – Timeless Luxury vs Likes & Comments")
 
@@ -40,20 +29,26 @@ st.markdown(
     """
     **Required columns (case-sensitive)** in your CSV:
 
-    * `classic_timeless_luxury` → binary 0 / 1 flag  
-    * `likes`                   → numeric  
-    * `comments`                → numeric
+    | column | type | description |
+    |--------|------|-------------|
+    | `classic_timeless_luxury` | 0 / 1 | tactic flag |
+    | `likes` | numeric | post likes |
+    | `comments` | numeric | post comments |
+
+    I’ll compute the Pearson correlation coefficients and (optionally) show
+    a scatterplot.
     """
 )
 
-csv = st.file_uploader("📁 Upload CSV", type="csv")
-if csv is None:
+uploaded = st.file_uploader("📁 Upload CSV", type="csv")
+if uploaded is None:
     st.stop()
 
+# read with encoding fallback
 try:
-    df = safe_read_csv(csv)
+    df = safe_read_csv(uploaded)
 except UnicodeDecodeError as err:
-    st.error(f"Cannot decode file: {err}")
+    st.error(f"Cannot decode CSV: {err}")
     st.stop()
 
 st.subheader("Preview")
@@ -64,23 +59,26 @@ if not required.issubset(df.columns):
     st.error(f"CSV must contain columns: {', '.join(required)}")
     st.stop()
 
-# convert and clean
+# ensure numeric types
 df["classic_timeless_luxury"] = df["classic_timeless_luxury"].astype(float)
-df["likes"]    = pd.to_numeric(df["likes"],    errors="coerce")
-df["comments"] = pd.to_numeric(df["comments"], errors="coerce")
+for col in ("likes", "comments"):
+    df[col] = pd.to_numeric(df[col], errors="coerce")
+
 clean = df.dropna(subset=required)
 
 st.markdown("### Correlation matrix")
 corr = clean[list(required)].corr().round(3)
 st.dataframe(corr, use_container_width=True)
 
+# download correlation table
 st.download_button(
     "💾 Download correlation CSV",
     corr.to_csv().encode(),
-    file_name=f"{Path(csv.name).stem}_correlation.csv",
+    file_name=f"{Path(uploaded.name).stem}_correlation.csv",
     mime="text/csv",
 )
 
+# optional scatterplot
 if HAS_PLOT:
     metric = st.selectbox("Scatterplot against:", ("likes", "comments"))
     fig, ax = plt.subplots()
