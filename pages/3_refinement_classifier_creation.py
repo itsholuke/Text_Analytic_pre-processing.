@@ -108,7 +108,14 @@ st.header("Step 2 — Merge sentence‑ and post‑level data")
 
 if st.button("🔗 Merge on ID"):
     df = st.session_state.token_df.copy()
-    gt = st.session_state.gt_df[["ID", "mode_researcher", "likes", "comments"]].copy()
+    # pick only columns that actually exist in upload
+        desired_cols = ["ID", "mode_researcher", "likes", "comments"]
+        present_cols = [c for c in desired_cols if c in st.session_state.gt_df.columns]
+        if {"ID", "mode_researcher"}.issubset(present_cols):
+            gt = st.session_state.gt_df[present_cols].copy()
+        else:
+            st.error("Ground‑truth file must have at least 'ID' and 'mode_researcher' columns.")
+            st.stop()
     st.session_state.merged_df = df.merge(gt, on="ID", how="left", indicator=True)
 
     missing = st.session_state.merged_df["_merge"].eq("left_only").sum()
