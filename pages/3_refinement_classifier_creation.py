@@ -129,41 +129,43 @@ if st.session_state.pred_ready:
     st.table(pd.Series([c for cats in st.session_state.pred_df.categories for c in cats]).value_counts())
 
 # ─────────── GROUND-TRUTH (Step 5B) ─────────────────────
-if st.session_state.pred_ready and not st.session_state.gt_ready:
-    st.subheader("Step 5‑B — Ground-truth")
-    mode = st.radio("GT source", ["None","Upload CSV","Manual entry"], horizontal=True)
-    if mode == "None":
-        st.warning("No ground-truth provided — please upload CSV or use Manual entry to proceed.")
-        st.session_state.gt_ready = False
-    elif mode == "Upload CSV":
-        # allow any CSV column as ground truth
-        gt_file = st.file_uploader("Upload GT CSV", type="csv", key="gt_csv")
-        if gt_file:
-            gtd = pd.read_csv(gt_file)
-            st.session_state.gt_df = gtd
-            # let user select any column
-            cols = list(gtd.columns)
-            st.session_state.gt_col = st.selectbox(
-                "Select ground-truth column", cols,
-                index=cols.index("mode_researcher") if "mode_researcher" in cols else 0
-            )
-            st.session_state.gt_ready = True
-            st.success("Ground-truth CSV loaded; column '" + st.session_state.gt_col + "' selected.")
-        else:
-            st.info("Upload a CSV file to select your ground-truth column.")
-            st.stop()
-    else:  # Manual entry
-        flag = f"{tactic}_flag_gt"
-        dfm = st.session_state.pred_df.copy()
-        dfm[flag] = dfm.get(flag,0)
-        dfm[flag] = pd.to_numeric(dfm[flag],errors="coerce").fillna(0).astype(int)
-        dfm["_snippet_"] = dfm[text_col].astype(str).str.slice(0,120)
-        edited = st.data_editor(dfm[["ID","_snippet_",flag]], use_container_width=True, height=600)
-        st.session_state.pred_df[flag] = pd.to_numeric(edited[flag],errors="coerce").fillna(0).astype(int)
-        st.session_state.pred_df["true_label"] = st.session_state.pred_df[flag].apply(lambda x: [tactic] if x else [])
+st.subheader("Step 5‑B — Ground-truth")
+mode = st.radio("GT source", ["None","Upload CSV","Manual entry"], horizontal=True)
+# None: do nothing, gt_ready remains False
+if mode == "Upload CSV":
+    gt_file = st.file_uploader("Upload GT CSV", type="csv", key="gt_csv")
+    if gt_file:
+        gtd = pd.read_csv(gt_file)
+        st.session_state.gt_df = gtd
+        cols = list(gtd.columns)
+        st.session_state.gt_col = st.selectbox(
+            "Select ground-truth column", cols,
+            index=cols.index("mode_researcher") if "mode_researcher" in cols else 0
+        )
         st.session_state.gt_ready = True
+        st.success(f"Ground-truth CSV loaded; column '{st.session_state.gt_col}' selected.")
+elif mode == "Manual entry":
+    # Always show manual entry editor, never st.stop()
+    flag = f"{tactic}_flag_gt"
+    # Use raw_df for manual entry if pred_df empty
+    base_df = st.session_state.pred_df.copy() if st.session_state.pred_ready else st.session_state.raw_df.copy()
+    if flag not in base_df.columns:
+        base_df[flag] = 0
+    base_df[flag] = pd.to_numeric(base_df[flag], errors="coerce").fillna(0).astype(int)
+    if "_snippet_" not in base_df.columns:
+        base_df["_snippet_"] = base_df[text_col].astype(str).str.slice(0,120)
+    edited = st.data_editor(
+        base_df[["ID","_snippet_", flag]],
+        use_container_width=True,
+        height=600,
+        key="manual_gt"
+    )
+    st.session_state.gt_df = st.session_state.raw_df.copy()
+    st.session_state.gt_df[flag] = pd.to_numeric(edited[flag], errors="coerce").fillna(0).astype(int)
+    st.session_state.gt_df["true_label"] = st.session_state.gt_df[flag].apply(lambda x: [tactic] if x else [])
+    st.session_state.gt_ready = True
 
-# ─────────── METRICS (Step 6) ────────────────────────────
+# ─────────── METRICS (Step 6) ──────────────────────────── (Step 6) (Step 6) ────────────────────────────
 if st.session_state.pred_ready and st.session_state.gt_ready:
     st.subheader("Step 6 — Precision / Recall / F1")
     dfp = st.session_state.pred_df.copy()
