@@ -165,29 +165,41 @@ elif mode == "Manual entry":
     st.session_state.gt_df["true_label"] = st.session_state.gt_df[flag].apply(lambda x: [tactic] if x else [])
     st.session_state.gt_ready = True
 
-# ─────────── METRICS (Step 6) ──────────────────────────── (Step 6) (Step 6) ────────────────────────────
-if st.session_state.pred_ready and st.session_state.gt_ready:
-    st.subheader("Step 6 — Precision / Recall / F1")
-    dfp = st.session_state.pred_df.copy()
-    if "true_label" not in dfp:
-        dfp["true_label"] = dfp["tactic_flag"].apply(lambda x: [tactic] if x else [])
-    dfp["gt_list"] = dfp["true_label"].apply(to_list)
-    dfp["pred_list"] = dfp["categories"]
-    rows=[]
-    for tac in st.session_state.dictionary:
-        dfp["pred_flag"] = dfp["pred_list"].apply(lambda lst: tac in lst)
-        dfp["gt_flag"]   = dfp["gt_list"].apply(lambda lst: tac in lst)
-        TP = int((dfp.pred_flag & dfp.gt_flag).sum())
-        FP = int((dfp.pred_flag & ~dfp.gt_flag).sum())
-        FN = int((~dfp.pred_flag & dfp.gt_flag).sum())
-        prec = TP/(TP+FP) if TP+FP else 0
-        rec  = TP/(TP+FN) if TP+FN else 0
-        f1   = 2*prec*rec/(prec+rec) if prec+rec else 0
-        rows.append({"tactic":tac,"TP":TP,"FP":FP,"FN":FN,"precision":prec,"recall":rec,"f1":f1})
-    mdf = pd.DataFrame(rows).set_index("tactic")
-    st.dataframe(mdf.style.format({"precision":"{:.3f}","recall":"{:.3f}","f1":"{:.3f}"}), use_container_width=True)
-    st.success("Metrics computed.")
-
-    # ─────────── DOWNLOAD (Step 7) ─────────────────────────
-    st.markdown("### 📥 Download results")
-    st.download_button("Download CSV", dfp.to_csv(index=False).encode(), "class_results.csv", mime="text/csv")
+# ─────────── STEP 6 — Compute Metrics & Download ───────────────────
+st.subheader("Step 6 — Compute Metrics")
+if not st.session_state.pred_ready:
+    st.info("Run classification first to enable metrics.")
+elif not st.session_state.gt_ready:
+    st.info("Provide ground-truth (Upload CSV or Manual entry) to enable metrics.")
+else:
+    if st.button("🔹 Compute Metrics"):
+        dfp = st.session_state.pred_df.copy()
+        # ensure true_label exists
+        if "true_label" not in dfp:
+            dfp["true_label"] = dfp["tactic_flag"].apply(lambda x: [tactic] if x else [])
+        dfp["gt_list"]   = dfp["true_label"].apply(to_list)
+        dfp["pred_list"] = dfp["categories"]
+        rows = []
+        for tac in st.session_state.dictionary.keys():
+            dfp["pred_flag"] = dfp["pred_list"].apply(lambda lst: tac in lst)
+            dfp["gt_flag"]   = dfp["gt_list"].apply(lambda lst: tac in lst)
+            TP = int((dfp.pred_flag & dfp.gt_flag).sum())
+            FP = int((dfp.pred_flag & ~dfp.gt_flag).sum())
+            FN = int((~dfp.pred_flag & dfp.gt_flag).sum())
+            prec = TP/(TP+FP) if TP+FP else 0.0
+            rec  = TP/(TP+FN) if TP+FN else 0.0
+            f1   = 2*prec*rec/(prec+rec) if prec+rec else 0.0
+            rows.append({"tactic":tac,"TP":TP,"FP":FP,"FN":FN,
+                         "precision":prec,"recall":rec,"f1":f1})
+        metrics_df = pd.DataFrame(rows).set_index("tactic")
+        st.markdown("##### Precision / Recall / F1")
+        st.dataframe(metrics_df.style.format({"precision":"{:.3f}","recall":"{:.3f}","f1":"{:.3f}"}))
+        st.success("Metrics computed.")
+        # Download
+        st.markdown("### 📥 Download results")
+        st.download_button(
+            "Download classified_results.csv",
+            dfp.to_csv(index=False).encode(),
+            "classified_results.csv",
+            mime="text/csv"
+        )
