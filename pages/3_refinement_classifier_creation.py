@@ -68,6 +68,18 @@ for k, v in STATE_DEFAULTS.items():
 
 # ───────── STEP 1 – upload files ───────────────────────────
 st.header("Step 1 — Upload data files")
+
+@st.cache_data(show_spinner=False)
+def load_csv(uploaded_file):
+    """Try utf‑8, then latin‑1 as fallback to avoid UnicodeDecodeError."""
+    for enc in ("utf-8", "latin1"):
+        try:
+            return pd.read_csv(uploaded_file, encoding=enc)
+        except UnicodeDecodeError:
+            uploaded_file.seek(0)  # reset pointer for next attempt
+    st.error("Cannot decode CSV with utf‑8 or latin‑1. Please save the file with a standard encoding.")
+    st.stop()
+
 col1, col2 = st.columns(2)
 with col1:
     token_file = st.file_uploader("📄 Tokenised CSV (sentence‑level)", type="csv", key="token")
@@ -75,23 +87,23 @@ with col2:
     gt_file = st.file_uploader("📄 Original captions CSV (with mode_researcher, likes, comments)", type="csv", key="gt")
 
 if token_file:
-    st.session_state.token_df = pd.read_csv(token_file)
+    st.session_state.token_df = load_csv(token_file)
     if "ID" not in st.session_state.token_df.columns:
         st.error("Tokenised file must contain an 'ID' column.")
         st.stop()
-    st.success("Tokenised file loaded — {} rows".format(len(st.session_state.token_df)))
+    st.success(f"Tokenised file loaded — {len(st.session_state.token_df)} rows")
 
 if gt_file:
-    st.session_state.gt_df = pd.read_csv(gt_file)
+    st.session_state.gt_df = load_csv(gt_file)
     if "mode_researcher" not in st.session_state.gt_df.columns:
         st.error("Ground‑truth file must contain 'mode_researcher'.")
         st.stop()
-    st.success("Ground‑truth file loaded — {} rows".format(len(st.session_state.gt_df)))
+    st.success(f"Ground‑truth file loaded — {len(st.session_state.gt_df)} rows")
 
 if st.session_state.token_df.empty or st.session_state.gt_df.empty:
     st.stop()
 
-# ───────── STEP 2 – merge & inspect ────────────────────────
+# ───────── STEP 2 – merge & inspect ──────────────────────── ────────────────────────
 st.header("Step 2 — Merge sentence‑ and post‑level data")
 
 if st.button("🔗 Merge on ID"):
