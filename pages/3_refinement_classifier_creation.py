@@ -1,130 +1,236 @@
 # streamlit_app.py
-import re, ast
+# -------------------------------------------------------------
+# Text Content Analysis Tool
+# End‑to‑end workflow: upload → pick text column → configure
+#   dictionaries → run analysis → view metrics + precision/recall/F1
+# -------------------------------------------------------------
+import re
+import ast
 import pandas as pd
 import streamlit as st
 
-# ── matplotlib is optional ──────────────────────────────────
+# ─────────────────────────────────────────────────────────────
+# OPTIONAL PLOTTING (auto‑skip if matplotlib missing)
+# ─────────────────────────────────────────────────────────────
 try:
     import matplotlib.pyplot as plt
     HAS_PLOT = True
 except ModuleNotFoundError:
     HAS_PLOT = False
-# ────────────────────────────────────────────────────────────
 
-# ---------- helpers ----------
+# ─────────────────────────────────────────────────────────────
+# HELPERS
+# ─────────────────────────────────────────────────────────────
+
 def clean(txt: str) -> str:
-    "Lower-case & keep only letters / digits / spaces."
+    """Lower‑case & keep only letters/digits/spaces."""
     return re.sub(r"[^a-zA-Z0-9\s]", " ", str(txt)).lower().strip()
 
-def classify(txt: str, dictionaries: dict) -> list[str]:
-    words = set(txt.split())
-    hits  = [name for name, terms in dictionaries.items() if words & terms]
-    return hits or ["uncategorized"]
 
-def init_state():
-    default = dict(df=None, top_words=None,
-                   dictionary=None, dict_ready=False)
-    for k, v in default.items():
-        st.session_state.setdefault(k, v)
-# -----------------------------
+def classify_text(tokens: list[str], dictionaries: dict[str, set[str]]):
+    """Return a list of categories whose keyword sets intersect tokens."""
+    hit_cats = [n for n, kws in dictionaries.items() if kws & set(tokens)]
+    return hit_cats or ["uncategorized"]
 
-st.set_page_config(page_title="Marketing-Tactic Text Classifier",
-                   page_icon="📊", layout="wide")
-st.title("📊 Marketing-Tactic Text Classifier")
 
-# STEP 1 ─── tactic selector
-DEFAULT_TACTICS = {
-    "urgency_marketing":  ["now", "today", "limited", "hurry", "exclusive"],
-    "social_proof":       ["bestseller", "popular", "trending", "recommended"],
-    "discount_marketing": ["sale", "discount", "deal", "free", "offer"],
+# ─────────────────────────────────────────────────────────────
+# DEFAULT DICTIONARIES (can be overwritten / extended)
+# ─────────────────────────────────────────────────────────────
+DEFAULT_DICTIONARIES = {
+    "urgency_marketing": {
+        "now", "today", "hurry", "limited", "last", "final",
+        "act", "instant", "immediately", "deadline", "ending",
+        "soon", "rush", "while", "stock", "running", "gone",
+    },
+    "exclusive_marketing": {
+        "exclusive", "members", "vip", "private", "invite", "selected",
+        "access", "insider", "limited access", "by invitation",
+        "privileged", "special", "only", "elite", "premier",
+    },
+    "classic_timeless_luxury": {
+        "timeless", "heritage", "vintage", "classic", "iconic",
+        "elegant", "refined", "bespoke", "couture",
+    },
 }
-tactic = st.selectbox("🎯 Step 1 — choose a tactic", list(DEFAULT_TACTICS))
-st.write(f"Chosen tactic: **{tactic}**")
 
-# STEP 2 ─── data upload
-uploaded = st.file_uploader("📁 Step 2 — upload CSV", type="csv")
-init_state()
 
-if uploaded is None:
-    st.info("Upload a CSV to begin.")
+# ─────────────────────────────────────────────────────────────
+# SESSION STATE KEYS INITIALISATION
+# ─────────────────────────────────────────────────────────────
+for key in (
+    "df", "clean_tokens", "dictionaries", "analysis_done",
+    "category_freq", "keyword_freq", "y_true", "y_pred",
+):
+    st.session_state.setdefault(key, None)
+
+# ─────────────────────────────────────────────────────────────
+# 1.  UPLOAD YOUR DATA
+# ─────────────────────────────────────────────────────────────
+st.title("📊 Text Content Analysis Tool")
+st.caption("Analyze text content using customizable dictionaries to identify patterns and categories.")
+
+st.header("1. Upload Your Data")
+file = st.file_uploader(
+    "Upload CSV file containing text data", type="csv",
+    help="CSV must include at least one text column",
+)
+if file:
+    df = pd.read_csv(file)
+    st.success(f"File uploaded successfully! Found {len(df):,} rows.")
+    st.session_state.df = df
+else:
     st.stop()
 
-df = pd.read_csv(uploaded)
-st.dataframe(df.head(), use_container_width=True)
+# ─────────────────────────────────────────────────────────────
+# 2.  SELECT TEXT COLUMN
+# ─────────────────────────────────────────────────────────────
+st.header("Select Text Column")
+text_col = st.selectbox("Choose the column containing text to analyze:", df.columns)
 
-text_col = st.selectbox("📋 Step 3 — select text column", df.columns)
-df["cleaned"] = df[text_col].apply(clean)
+with st.expander("🔍 Data Preview"):
+    st.dataframe(df.head(10), use_container_width=True)
 
-# STEP 4 ─── generate / edit dictionary
-if st.button("🧠 Step 4 — Generate Keywords & Dictionary"):
-    word_freq = (
-        pd.Series(" ".join(df["cleaned"]).split())
-        .value_counts()
-        .loc[lambda s: s.gt(1)]
-        .head(20)
-    )
-    st.subheader("Top keywords in the file")
-    st.dataframe(word_freq, use_container_width=True)
+# ─────────────────────────────────────────────────────────────
+# 3.  CONFIGURE ANALYSIS DICTIONARIES
+# ─────────────────────────────────────────────────────────────
+st.header("2. Configure Analysis Dictionaries")
 
-    auto_dict = {tactic: word_freq.index.tolist()}
-    st.code(auto_dict, language="python")
+dict_source = st.radio(
+    "Dictionary Input",
+    ("Use Default Dictionaries", "Enter Custom Dictionaries"),
+    horizontal=True,
+)
 
-    dict_text = st.text_area("✏️ Edit dictionary (Python literal)",
-                             value=str(auto_dict), height=150)
-
+if dict_source == "Use Default Dictionaries":
+    dictionaries = DEFAULT_DICTIONARIES.copy()
+else:
+    st.markdown("Enter your custom dictionaries in **valid Python dict** format:")
+    ex = '{"urgency_marketing": ["now", "hurry"],\n "exclusive_marketing": ["exclusive", "vip"]}'
+    user_dict_text = st.text_area("Paste your dictionaries here:", value=ex, height=150)
     try:
-        final_dict = ast.literal_eval(dict_text)
-        if not isinstance(final_dict, dict):
-            raise ValueError("Not a dict.")
-        final_dict = {k: set(map(str.lower, v)) for k, v in final_dict.items()}
-        st.success("Dictionary saved.")
-        st.session_state.update(df=df,
-                                top_words=word_freq,
-                                dictionary=final_dict,
-                                dict_ready=True)
-    except Exception as err:
-        st.error(f"❌ Dictionary parse error: {err}")
+        parsed = ast.literal_eval(user_dict_text)
+        dictionaries = {k: set(map(str.lower, v)) for k, v in parsed.items()}
+        st.success("Custom dictionaries parsed successfully!")
+    except Exception as e:
+        st.error(f"❌ Error parsing dictionaries: {e}")
+        st.stop()
 
-# STEP 5 ─── classification
-if st.session_state.dict_ready and st.button("🧪 Step 5 — Run Classification"):
-    df         = st.session_state.df.copy()
-    dictionary = st.session_state.dictionary
-    top_words  = st.session_state.top_words
-
-    df["categories"]  = df["cleaned"].apply(lambda t: classify(t, dictionary))
-    df["tactic_flag"] = df["categories"].apply(lambda c: int(tactic in c))
-
-    counts = (
-        pd.Series([c for cats in df["categories"] for c in cats])
-        .value_counts()
-        .rename_axis("category")
-        .to_frame("count")
+# Show dictionary summary (terms per category)
+with st.container():
+    st.subheader("Dictionary Summary")
+    summary_df = pd.DataFrame(
+        {"Category": list(dictionaries.keys()),
+         "Terms": [len(v) for v in dictionaries.values()]}
     )
+    st.table(summary_df.set_index("Category"))
 
-    st.subheader("📊 Category frequencies")
-    st.dataframe(counts, use_container_width=True)
+# ─────────────────────────────────────────────────────────────
+# 4.  RUN ANALYSIS
+# ─────────────────────────────────────────────────────────────
+st.header("3. Run Analysis")
+if st.button("🚀 Start Analysis"):
 
-    st.subheader("🔑 Top keywords")
-    st.dataframe(top_words, use_container_width=True)
+    # Tokenise text column + store tokens for reuse
+    clean_tokens = df[text_col].fillna("").apply(lambda x: re.findall(r"\w+", x.lower()))
+    st.session_state.clean_tokens = clean_tokens
+
+    # Classification per sentence / row
+    categories = clean_tokens.apply(lambda toks: classify_text(toks, dictionaries))
+    df["categories"] = categories
+
+    # Flatten to get overall keyword frequency
+    all_tokens = [tok for toks in clean_tokens for tok in toks]
+    keyword_freq = pd.Series(all_tokens, name="keyword").value_counts()
+
+    # Category frequency (# of posts containing category)
+    cat_flat = [c for cats in categories for c in cats]
+    category_freq = pd.Series(cat_flat, name="category").value_counts()
+
+    st.session_state.keyword_freq  = keyword_freq
+    st.session_state.category_freq = category_freq
+
+    # Ground‑truth handling (optional)
+    gt_cols = [c for c in df.columns if set(df[c].unique()) <= {0, 1}]
+    y_true = y_pred = None
+    if gt_cols:
+        gt_col = st.selectbox("Optional ground‑truth 0/1 column for metrics:", gt_cols)
+        y_true = df[gt_col].astype(int)
+
+        # For a multi‑label scenario we consider positive if the selected
+        # ground‑truth tactic name appears somewhere in the dictionaries keys.
+        # Match by column name prefix if possible.
+        target_cat = None
+        for cat in dictionaries:
+            if cat in gt_col or gt_col in cat:
+                target_cat = cat
+                break
+        if target_cat is None:
+            target_cat = list(dictionaries)[0]  # fallback first category
+
+        y_pred = df["categories"].apply(lambda cats: int(target_cat in cats))
+        st.session_state.y_true = y_true
+        st.session_state.y_pred = y_pred
+    else:
+        st.info("No 0/1 ground‑truth columns detected – precision/recall/F1 will be skipped.")
+
+    st.session_state.analysis_done = True
+    st.success("Analysis completed successfully!")
+
+# ─────────────────────────────────────────────────────────────
+# 5.  ANALYSIS RESULTS
+# ─────────────────────────────────────────────────────────────
+if st.session_state.analysis_done:
+
+    st.header("4. Analysis Results")
+
+    # Category Analysis
+    st.subheader("📊 Category Analysis")
+    cat_df = st.session_state.category_freq.rename_axis("Category").reset_index(name="Posts")
+    cat_df["Percentage"] = (cat_df["Posts"] / cat_df["Posts"].sum() * 100).round(1)
+    st.dataframe(cat_df, use_container_width=True)
+
+    # Top Keywords
+    st.subheader("🔑 Top Keywords Overall")
+    kw_df = st.session_state.keyword_freq.reset_index()
+    kw_df.columns = ["Keyword", "Frequency"]
+    st.dataframe(kw_df.head(20), use_container_width=True)
 
     if HAS_PLOT:
-        fig, ax = plt.subplots(figsize=(8, 3))
-        top_words.sort_values(ascending=False).plot.bar(ax=ax)
-        ax.set_title("Top keyword frequencies")
+        fig, ax = plt.subplots(figsize=(6, 3))
+        kw_df.head(20).set_index("Keyword")["Frequency"].plot.bar(ax=ax)
+        ax.set_ylabel("Freq")
+        ax.set_title("Top 20 keywords")
         st.pyplot(fig)
-    else:
-        st.info("Matplotlib not found – skipping chart.")
 
-    # downloads
-    st.download_button("📥 classified_results.csv",
-                       df.to_csv(index=False).encode(),
-                       "classified_results.csv",
-                       "text/csv")
-    st.download_button("📥 category_frequencies.csv",
-                       counts.to_csv().encode(),
-                       "category_frequencies.csv",
-                       "text/csv")
-    st.download_button("📥 top_keywords.csv",
-                       top_words.to_csv().encode(),
-                       "top_keywords.csv",
-                       "text/csv")
+    # Sample Tagged Posts
+    st.subheader("📄 Sample Tagged Posts")
+    chosen_cat = st.selectbox("Select category to view sample posts:", cat_df["Category"])
+    sample_posts = df[df["categories"].apply(lambda cats: chosen_cat in cats)][text_col].head(3)
+    for idx, post in sample_posts.iteritems():
+        st.text_area(f"Post {idx}", value=post, height=80, disabled=True)
+
+    # Precision / Recall / F1 (if ground‑truth available)
+    if st.session_state.y_true is not None:
+        y_true = st.session_state.y_true
+        y_pred = st.session_state.y_pred
+        tp = int(((y_true == 1) & (y_pred == 1)).sum())
+        fp = int(((y_true == 0) & (y_pred == 1)).sum())
+        fn = int(((y_true == 1) & (y_pred == 0)).sum())
+
+        precision = tp / (tp + fp) if (tp + fp) else 0.0
+        recall    = tp / (tp + fn) if (tp + fn) else 0.0
+        f1        = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
+
+        st.subheader("🎯 Classification Metrics (binary)")
+        st.metric("Precision", f"{precision:.3f}")
+        st.metric("Recall", f"{recall:.3f}")
+        st.metric("F1‑score", f"{f1:.3f}")
+
+    # Full Results table download
+    st.header("5. Download Results")
+    st.download_button(
+        "📥 Download Full Results (CSV)",
+        df.to_csv(index=False).encode(),
+        "full_results.csv",
+        "text/csv",
+    )
