@@ -4,9 +4,9 @@
 # --------------------------------------------------------------------
 # • Accepts ANY CSV
 # • User maps Post‑ID and Caption/Text columns
-# • Step 1  ➜ Tokenise captions into sentences (downloads token file)
-# • Step 2  ➜ Optionally append a two‑sentence rolling context window
-#             (downloads final context file)
+# • Step 1  ➜ Tokenise captions into sentences (download token file)
+# • Step 2  ➜ Append mandatory two‑sentence rolling context window
+#             (download final context file)
 # --------------------------------------------------------------------
 import re
 import pandas as pd
@@ -27,10 +27,10 @@ st.markdown(
     """
     **Workflow**  
     1️⃣ **Upload** any CSV and choose the *Post‑ID* and *Caption/Text* columns.  
-    2️⃣ Click **Tokenise** to split each caption into sentences and download
+    2️⃣ Click **Tokenise** to split each caption into sentences and preview / download
        **ig_posts_tokenised.csv**.  
-    3️⃣ Click **Add Rolling Context** to add a two‑sentence window and
-       download **ig_posts_tokenised_with_context.csv**.
+    3️⃣ Click **Add Rolling Context** to append a two‑sentence window and download
+       **ig_posts_tokenised_with_context.csv**.
     """
 )
 
@@ -71,7 +71,7 @@ if st.button("🚀 Tokenise"):
             })
 
     token_df = pd.DataFrame(rows)
-    st.session_state["token_df"] = token_df  # store for next step
+    st.session_state.token_df = token_df  # store for next step
 
     st.success(f"Tokenised {len(raw_df):,} posts into {len(token_df):,} sentences.")
     st.dataframe(token_df.head(10), use_container_width=True)
@@ -84,18 +84,23 @@ if st.button("🚀 Tokenise"):
     )
 
 # ─────────────────────────────────────────────────────────────
-# 4 • Optional rolling context
+# 4 • Rolling context (always available after tokenisation)
 # ─────────────────────────────────────────────────────────────
-if st.session_state.get("token_df") is not None:
+if hasattr(st.session_state, "token_df"):
     st.divider()
-    st.header("Optional: Add Rolling Context")
+    st.header("Add Two‑Sentence Rolling Context")
 
-    if st.button("➕ Add two‑sentence rolling context"):
-        token_df = st.session_state["token_df"].copy()
-        token_df.sort_values(by=["ID", "Sentence ID"], inplace=True)
-        token_df["Rolling_Context"] = (
-            token_df.groupby("ID")["Statement"].apply(lambda s: s.shift(1).fillna("") + " " + s)
-        ).str.strip()
+    if st.button("➕ Add rolling context"):
+        token_df = st.session_state.token_df.copy()
+
+        # Ensure correct ordering within each post if Sentence ID exists
+        sort_cols = ["ID"] + (["Sentence ID"] if "Sentence ID" in token_df.columns else [])
+        token_df.sort_values(by=sort_cols, inplace=True)
+
+        # Build rolling context aligned with original index
+        token_df["Rolling_Context"] = token_df.groupby("ID")["Statement"].transform(
+            lambda s: (s.shift(1).fillna("") + " " + s).str.strip()
+        )
 
         st.success("Rolling context column added.")
         st.dataframe(token_df.head(10), use_container_width=True)
