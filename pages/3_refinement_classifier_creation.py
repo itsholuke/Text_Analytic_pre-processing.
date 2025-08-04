@@ -1,96 +1,179 @@
-# pages/3_Refinement_Classifier_Creation.py
-# --------------------------------------------------------------------
-# Refinement Classifier Creation – tactic dictionary + metrics
-# --------------------------------------------------------------------
-import re, ast, pandas as pd, streamlit as st
+# ────────────────────────────────────────────────────────────
+#  streamlit_app.py  –  FULL VERSION with tactic‑aware Step 4
+# ────────────────────────────────────────────────────────────
+import streamlit as st
+import pandas as pd
+import matplotlib.pyplot as plt
+import re, ast
 
-# ── optional plotting (skip gracefully if matplotlib missing) ─────────
-try:
-    import matplotlib.pyplot as plt
-    HAS_PLOT = True
-except ModuleNotFoundError:
-    HAS_PLOT = False
-# ---------------------------------------------------------------------
+st.title("📊 Marketing‑Tactic Text Classifier")
 
-st.set_page_config(page_title="Refinement Classifier Creation", page_icon="🛠️")
-st.title("🛠️ Refinement Classifier Creation")
+# ───────────────── STEP 1 – choose tactic ───────────────────
+default_tactics = {
+    "urgency_marketing":  ["now", "today", "limited", "hurry", "exclusive"],
+    "social_proof":       ["bestseller", "popular", "trending", "recommended"],
+    "discount_marketing": ["sale", "discount", "deal", "free", "offer"],
+    "Classic_Timeless_Luxury_style": [
+        'elegance', 'heritage', 'sophistication', 'refined', 'timeless', 'grace',
+        'legacy', 'opulence', 'bespoke', 'tailored', 'understated', 'prestige',
+        'quality', 'craftsmanship', 'heirloom', 'classic', 'tradition', 'iconic',
+        'enduring', 'rich', 'authentic', 'luxury', 'fine', 'pure', 'exclusive',
+        'elite', 'mastery', 'immaculate', 'flawless', 'distinction', 'noble',
+        'chic', 'serene', 'clean', 'minimal', 'poised', 'balanced', 'eternal',
+        'neutral', 'subtle', 'grand', 'timelessness', 'tasteful', 'quiet', 'sublime'
+    ]
+}
+tactic = st.selectbox("🎯 Step 1 — choose a tactic", list(default_tactics.keys()))
+st.write(f"Chosen tactic: *{tactic}*")
 
-# ---------- upload ---------------------------------------------------
-upload = st.file_uploader("📁 Upload CSV", type="csv")
-if upload is None:
-    st.stop()
+# ───────────────── STEP 2 – upload CSV ──────────────────────
+file = st.file_uploader("📁 Step 2 — upload CSV", type="csv")
 
-df = pd.read_csv(upload)
-st.subheader("Preview")
-st.dataframe(df.head(), use_container_width=True)
+# ---------- helper functions --------------------------------
+def clean(txt: str) -> str:
+    """Lower‑case & remove punctuation/digits for simple tokenisation."""
+    return re.sub(r"[^a-zA-Z0-9\s]", "", str(txt).lower())
 
-text_col = st.selectbox("Text column:", df.columns)
+def classify(txt: str, dct):
+    """Return list of categories whose term list appears at least once."""
+    toks = txt.split()
+    return [cat for cat, terms in dct.items() if any(w in toks for w in terms)] or ["uncategorized"]
+# ------------------------------------------------------------
 
-# ---------- safe 0/1 column detection --------------------------------
-def is_binary(series: pd.Series) -> bool:
-    """True if column holds only 0/1 (or 0.0/1.0); False for un-hashable."""
-    try:
-        vals = set(series.dropna().unique())
-        return vals <= {0,1} or vals <= {0.0,1.0}
-    except TypeError:
-        return False                   # happens for list/dict cells
+# ────────── Streamlit session default flags/objects ─────────
+if "dict_ready"  not in st.session_state: st.session_state.dict_ready  = False
+if "dictionary"  not in st.session_state: st.session_state.dictionary  = {}
+if "top_words"   not in st.session_state: st.session_state.top_words   = pd.Series(dtype=int)
+if "df"          not in st.session_state: st.session_state.df          = pd.DataFrame()
 
-bin_cols = [c for c in df.columns if is_binary(df[c])]
-gt_col   = st.selectbox("Ground-truth 0/1 column (optional):",
-                        ["<none>"] + bin_cols)
+# ────────────────────────────────────────────────────────────
+#                   MAIN APP LOGIC
+# ────────────────────────────────────────────────────────────
+if file:
+    df = pd.read_csv(file)
+    st.dataframe(df.head())
 
-# ---------- tactic dictionary ----------------------------------------
-example = '{"urgency_marketing": ["now", "today", "hurry"]}'
-dict_text = st.text_area("Paste tactic dictionary (ONE key)", example, height=140)
+    text_col = st.selectbox("📋 Step 3 — select text column", df.columns)
 
-try:
-    parsed = ast.literal_eval(dict_text)
-    if len(parsed) != 1:
-        raise ValueError("Provide exactly ONE tactic")
-    tactic_name, keywords = next(iter(parsed.items()))
-    keywords = set(map(str.lower, keywords))
-except Exception as e:
-    st.error(f"Dict parse error → {e}")
-    st.stop()
+    # ─────────── STEP 4 – generate / refine dictionary ──────
+    if st.button("🧠 Step 4 — Generate Keywords & Dictionary"):
+        df["cleaned"] = df[text_col].apply(clean)
 
-# ---------- helper fns -----------------------------------------------
-clean = lambda t: re.sub(r"[^a-zA-Z0-9\\s]","",str(t).lower())
-classify_flag = lambda toks: int(any(w in toks for w in keywords))
-# ---------------------------------------------------------------------
+        # 1. tactic seed terms
+        base_terms = set(default_tactics[tactic])
 
-if st.button("🚀 Run"):
-    with st.spinner("Classifying…"):
-        df["_clean"]   = df[text_col].apply(clean)
-        df["pred_flag"] = df["_clean"].apply(lambda x: classify_flag(x.split()))
+        # 2. rows that mention ≥1 base term
+        df["row_matches_tactic"] = df["cleaned"].apply(
+            lambda x: any(tok in x.split() for tok in base_terms)
+        )
+        pos_df = df[df["row_matches_tactic"]]
 
-    freq = df["pred_flag"].value_counts().rename(index={0:"No",1:"Yes"})
-    st.subheader("Predicted tactic flag frequency")
-    st.dataframe(freq.rename("Rows"))
+        # 3. contextual term mining inside matching rows
+        stop_words = {
+            'the', 'is', 'in', 'on', 'and', 'a', 'for', 'you', 'i', 'are', 'of',
+            'your', 'to', 'my', 'with', 'it', 'me', 'this', 'that', 'or'
+        }
 
-    if HAS_PLOT and not freq.empty:
-        fig, ax = plt.subplots()
-        freq.plot.bar(ax=ax)
-        ax.set_ylabel("Rows"); ax.set_title("Predicted tactic flag")
-        st.pyplot(fig)
-    elif not HAS_PLOT:
-        st.info("Matplotlib not installed – skipping bar chart.")
+        if pos_df.empty:
+            st.warning(
+                "None of the rows contained the base terms for this tactic. "
+                "Auto dictionary will consist of the default terms only."
+            )
+            contextual_terms = []
+            contextual_freq  = pd.Series(dtype=int)
+        else:
+            all_pos_words = " ".join(pos_df["cleaned"]).split()
+            word_freq = pd.Series(all_pos_words).value_counts()
 
-    # ---------- metrics ------------------------------------------------
-    if gt_col != "<none>":
-        y_true = df[gt_col].astype(int)
-        y_pred = df["pred_flag"]
-        tp = int(((y_true==1)&(y_pred==1)).sum())
-        fp = int(((y_true==0)&(y_pred==1)).sum())
-        fn = int(((y_true==1)&(y_pred==0)).sum())
-        precision = tp/(tp+fp) if tp+fp else 0
-        recall    = tp/(tp+fn) if tp+fn else 0
-        f1        = 2*precision*recall/(precision+recall) if precision+recall else 0
-        st.subheader("Classification metrics")
-        st.metric("Precision", f"{precision:.3f}")
-        st.metric("Recall",    f"{recall:.3f}")
-        st.metric("F1-score",  f"{f1:.3f}")
+            contextual_terms = [
+                w for w in word_freq.index
+                if w not in stop_words and w not in base_terms
+            ][:30]                              # top‑30 contextual words
+            contextual_freq = word_freq.loc[contextual_terms]
 
-    # ---------- download ----------------------------------------------
-    st.download_button("💾 Download classified CSV",
-                       df.drop(columns=\"_clean\").to_csv(index=False).encode(),
-                       "refined_results.csv", "text/csv")
+        # 4. merge seed + contextual → dictionary
+        auto_dict = {tactic: sorted(base_terms.union(contextual_terms))}
+
+        # 5. show info and allow editing
+        st.subheader("Top contextual keywords (filtered)")
+        if not contextual_freq.empty:
+            st.dataframe(contextual_freq.rename("Frequency"))
+        else:
+            st.write("‑‑ none found ‑‑")
+
+        st.write("Auto‑generated dictionary:", auto_dict)
+
+        dict_text = st.text_area(
+            "✏ Edit dictionary (Python dict syntax)",
+            value=str(auto_dict),
+            height=150
+        )
+        try:
+            final_dict = ast.literal_eval(dict_text)
+            st.session_state.dictionary = final_dict
+            st.success("Dictionary saved.")
+        except Exception:
+            st.error("Bad format → using auto dict.")
+            st.session_state.dictionary = auto_dict
+
+        # 6. persist for Step 5
+        st.session_state.df         = df
+        st.session_state.top_words  = contextual_freq           # Series
+        st.session_state.dict_ready = True
+
+    # ─────────── STEP 5 – run classifier (only if ready) ────
+    if st.session_state.dict_ready:
+        if st.button("🧪 Step 5 — Run Classification"):
+            df         = st.session_state.df.copy()
+            top_words  = st.session_state.top_words
+            dictionary = st.session_state.dictionary
+
+            df["categories"] = df["cleaned"].apply(lambda x: classify(x, dictionary))
+            df["tactic_flag"] = df["categories"].apply(
+                lambda cats: 1 if tactic in cats else 0
+            )
+
+            counts = pd.Series(
+                [c for cats in df["categories"] for c in cats]
+            ).value_counts()
+
+            st.subheader("📊 Category frequencies")
+            st.table(counts)
+
+            st.subheader("🔑 Top contextual keywords")
+            if not top_words.empty:
+                st.table(top_words)
+            else:
+                st.write("‑‑ none to display ‑‑")
+
+            fig, ax = plt.subplots(figsize=(10, 4))
+            if not top_words.empty:
+                top_words.sort_values(ascending=False).plot.bar(ax=ax)
+                ax.set_title("Top contextual keyword frequencies")
+            else:
+                ax.text(0.5, 0.5, "No contextual keywords", ha="center", va="center")
+                ax.set_axis_off()
+            st.pyplot(fig)
+
+            # downloads
+            st.download_button(
+                "📥 classified_results.csv",
+                df.to_csv(index=False).encode(),
+                "classified_results.csv",
+                "text/csv",
+            )
+            st.download_button(
+                "📥 category_frequencies.csv",
+                counts.to_csv().encode(),
+                "category_frequencies.csv",
+                "text/csv",
+            )
+            if not top_words.empty:
+                st.download_button(
+                    "📥 top_keywords.csv",
+                    top_words.to_csv().encode(),
+                    "top_keywords.csv",
+                    "text/csv",
+                )
+else:
+    st.info("Upload a CSV to begin.")
