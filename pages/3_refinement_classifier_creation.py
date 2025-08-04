@@ -8,6 +8,19 @@ import ast, re
 import pandas as pd
 import streamlit as st
 
+# ─────────── HELPERS ────────────────────────────────────
+def to_list(x):
+    """Ensure values are lists: parse literal or return list."""
+    if isinstance(x, list):
+        return x
+    if isinstance(x, str) and x.startswith("["):
+        try:
+            return ast.literal_eval(x)
+        except:
+            return []
+    return []
+
+
 st.set_page_config(page_title="📊 Tactic Classifier + Metrics", layout="wide")
 # ─────────── TACTIC SELECTION (Step 1) ────────────────────
 DEFAULT_TACTICS = {
