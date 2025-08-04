@@ -150,8 +150,11 @@ if 'mode_researcher' in st.session_state.raw_df.columns and not st.session_state
 
 st.subheader("Step 5-B — Ground-truth & Metrics")
 mode = st.radio("Ground-truth source", ["None","Upload CSV","Manual entry"], horizontal=True)
-# Reset GT if changing mode
-if mode != "Upload CSV": st.session_state.gt_df = pd.DataFrame()
+# Clear GT only when selecting None
+if mode == "None":
+    st.session_state.gt_df = pd.DataFrame()
+    st.session_state.gt_ready = False
+
 # Upload CSV path
 if mode == "Upload CSV":
     gt_file = st.file_uploader("Upload CSV with ID + true_label / flag", type="csv", key="gt_up")
