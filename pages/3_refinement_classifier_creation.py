@@ -27,7 +27,17 @@ DEFAULT_TACTICS = {
     ],
 }
 st.title("📊 Marketing-Tactic Text Classifier + Metrics")
-tactic = st.sidebar.selectbox("🎯 Choose tactic", list(DEFAULT_TACTICS.keys()))
+tactic = st.sidebar.selectbox(
+    "🎯 Choose tactic",
+    [None] + list(DEFAULT_TACTICS.keys()),
+    format_func=lambda x: "Select a tactic" if x is None else x
+)
+# Halt until a tactic is chosen
+def _halt_without_tactic():
+    st.warning("Please select a tactic to begin.")
+    st.stop()
+if tactic is None:
+    _halt_without_tactic()
 st.write(f"Chosen tactic: *{tactic}*")
 
 # ─────────── HELPERS ─────────────────────────────────────
