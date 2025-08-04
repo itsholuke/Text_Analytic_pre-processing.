@@ -14,12 +14,14 @@ st.markdown(
     """
     Welcome! Use the sidebar to run the five-step pipeline:
 
-    1. **Sentence Tokenizer** – split each caption into individual sentences  
+    1. **Pre-processing_Sentence Tokenizer** – split each caption into individual sentences  
        *(downloads **_tokenised.csv**).*  
-    2. **Rolling Context Builder** – add a two-sentence (previous + current)
+    2. **Pre-processing_Rolling Context Builder** – add a two-sentence (previous + current)
        rolling context window  
        *(downloads **_with_context.csv**).*
-
+    3. **Refinement_Classifier Creationr** 
+    4. **Classifier_Word_Metrics** 
+    5. **Join_Table**
     ---
     **Tip:** pages appear automatically because they live in the `pages/`
     folder.  No extra routing code needed.
@@ -28,5 +30,6 @@ st.markdown(
 
 # You could add a logo or additional instructions here if desired.
 # Otherwise this page is just an informational landing screen.
+
 
 
