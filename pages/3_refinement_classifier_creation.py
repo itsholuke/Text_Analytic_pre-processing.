@@ -51,6 +51,9 @@ def safe_bool(x):
     return False
 
 # ─────────── session defaults & flags ─────────────────────
+# flag logic tweak: pred_ready always mirrors whether pred_df has rows
+# so Compute Metrics button won't stay grey after a rerun
+
 INIT = {
     "raw_df": pd.DataFrame(),
     "dictionary": {},
@@ -63,16 +66,12 @@ INIT = {
 for k,v in INIT.items():
     st.session_state.setdefault(k,v)
 
+# keep pred_ready in sync with stored predictions across reruns
+st.session_state.pred_ready = not st.session_state.pred_df.empty
+
 # ─────────── STEP 2 — upload raw CSV ──────────────────────
 raw = st.file_uploader("📁 Step 2 — upload raw CSV", type="csv")
 if raw:
-    st.session_state.raw_df = pd.read_csv(raw)
-    if "ID" not in st.session_state.raw_df.columns:
-        st.session_state.raw_df.insert(0,"ID",st.session_state.raw_df.index.astype(str))
-    st.session_state.pred_ready = st.session_state.gt_ready = False
-    st.dataframe(st.session_state.raw_df.head())
-
-if st.session_state.raw_df.empty:
     st.stop()
 
 text_col = st.selectbox("📋 Step 3 — select text column", st.session_state.raw_df.columns)
