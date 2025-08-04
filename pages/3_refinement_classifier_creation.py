@@ -1,27 +1,25 @@
 # ───────────────────────────────────────────────────────────
-#  streamlit_app.py          (Aug‑2025, dual‑file GT build)
+#  streamlit_app.py          (Aug‑2025, selectable‑GT build)
 #  ----------------------------------------------------------
 #  • Accept *two* inputs:
 #       1. Tokenised/rolling‑context CSV (sentences)
-#       2. Original caption‑level CSV with `mode_researcher`, likes, comments
-#  • Join them on `ID` to restore the ground‑truth
-#  • Build / edit tactic‑aware dictionary
-#  • Classify sentences and aggregate back to post‑level
-#  • Compute precision, recall, F1 at both sentence‑ and post‑level
-#  • Correlate post‑level flags with likes / comments
-#  • Download results
+#       2. Original caption‑level CSV (ground‑truth & engagement)
+#  • User chooses **any** ground‑truth column (default: mode_researcher)
+#  • Join on `ID`, build / refine dictionary, classify sentences
+#  • Compute metrics at sentence‑ and post‑level, correlate with likes/comments
+#  • Download sentence‑ and post‑level results
 # ───────────────────────────────────────────────────────────
 import ast
 import re
-from pathlib import Path
 
 import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
+from sklearn.metrics import precision_recall_fscore_support
 
 # ──────────────── Streamlit page setup ─────────────────────
 st.set_page_config(page_title="📊 Tactic Classifier + Metrics", layout="wide")
-st.title("📊 Sentence‑level Classifier with Post‑level Ground Truth")
+st.title("📊 Sentence‑level Classifier with Selectable Ground Truth")
 
 # ────────────────── built‑in dictionaries ──────────────────
 DEFAULT_TACTICS = {
@@ -51,180 +49,133 @@ def safe_bool(x, tac):
         return x.strip().lower() in {"1", "true", "yes", tac.lower()}
     return False
 
-# ─────────── STEP 0 – choose tactic ────────────────────────
-st.sidebar.header("Setup")
-tactic = st.sidebar.selectbox("🎯 Tactic", list(DEFAULT_TACTICS.keys()))
-
-# ───────────────────────── session init ────────────────────
-STATE_DEFAULTS = {
-    "token_df": pd.DataFrame(),
-    "gt_df": pd.DataFrame(),
-    "merged_df": pd.DataFrame(),
-    "dictionary": {},
-    "dict_ready": False,
-}
-for k, v in STATE_DEFAULTS.items():
-    st.session_state.setdefault(k, v)
-
-# ───────── STEP 1 – upload files ───────────────────────────
-st.header("Step 1 — Upload data files")
-
 @st.cache_data(show_spinner=False)
-def load_csv(uploaded_file):
-    """Try utf‑8, then latin‑1 as fallback to avoid UnicodeDecodeError."""
+def load_csv(file):
     for enc in ("utf-8", "latin1"):
         try:
-            return pd.read_csv(uploaded_file, encoding=enc)
+            return pd.read_csv(file, encoding=enc)
         except UnicodeDecodeError:
-            uploaded_file.seek(0)  # reset pointer for next attempt
-    st.error("Cannot decode CSV with utf‑8 or latin‑1. Please save the file with a standard encoding.")
+            file.seek(0)
+    st.error("Could not decode CSV. Save the file with UTF‑8 or Latin‑1 encoding.")
     st.stop()
 
+# ─────────── STEP 0 – choose tactic ────────────────────────
+tactic = st.sidebar.selectbox("🎯 Tactic", list(DEFAULT_TACTICS.keys()))
+
+# ─────────── STEP 1 – upload files ─────────────────────────
+st.header("Step 1 — Upload data files")
 col1, col2 = st.columns(2)
 with col1:
     token_file = st.file_uploader("📄 Tokenised CSV (sentence‑level)", type="csv", key="token")
 with col2:
-    gt_file = st.file_uploader("📄 Original captions CSV (with mode_researcher, likes, comments)", type="csv", key="gt")
+    gt_file = st.file_uploader("📄 Original captions CSV (ground truth & engagement)", type="csv", key="gt")
 
-if token_file:
-    st.session_state.token_df = load_csv(token_file)
-    if "ID" not in st.session_state.token_df.columns:
-        st.error("Tokenised file must contain an 'ID' column.")
-        st.stop()
-    st.success(f"Tokenised file loaded — {len(st.session_state.token_df)} rows")
-
-if gt_file:
-    st.session_state.gt_df = load_csv(gt_file)
-    if "mode_researcher" not in st.session_state.gt_df.columns:
-        st.error("Ground‑truth file must contain 'mode_researcher'.")
-        st.stop()
-    st.success(f"Ground‑truth file loaded — {len(st.session_state.gt_df)} rows")
-
-if st.session_state.token_df.empty or st.session_state.gt_df.empty:
+if not token_file or not gt_file:
+    st.info("Please upload both files.")
     st.stop()
 
-# ───────── STEP 2 – merge & inspect ──────────────────────── ────────────────────────
-st.header("Step 2 — Merge sentence‑ and post‑level data")
+sent_df = load_csv(token_file)
+gt_df   = load_csv(gt_file)
 
-if st.button("🔗 Merge on ID"):
-    df = st.session_state.token_df.copy()
-    # pick only columns that actually exist in upload
-        desired_cols = ["ID", "mode_researcher", "likes", "comments"]
-        present_cols = [c for c in desired_cols if c in st.session_state.gt_df.columns]
-        if {"ID", "mode_researcher"}.issubset(present_cols):
-            gt = st.session_state.gt_df[present_cols].copy()
-        else:
-            st.error("Ground‑truth file must have at least 'ID' and 'mode_researcher' columns.")
-            st.stop()
-    st.session_state.merged_df = df.merge(gt, on="ID", how="left", indicator=True)
-
-    missing = st.session_state.merged_df["_merge"].eq("left_only").sum()
-    if missing:
-        st.warning(f"{missing} sentences had no matching ground‑truth.")
-    st.session_state.merged_df.drop(columns="_merge", inplace=True)
-
-if st.session_state.merged_df.empty:
+if "ID" not in sent_df.columns:
+    st.error("Tokenised file must contain an 'ID' column.")
     st.stop()
 
-st.dataframe(st.session_state.merged_df.head())
+# ─────────── choose columns ────────────────────────────────
+st.header("Step 2 — Select columns")
 
-text_col = st.selectbox("Text column", [c for c in st.session_state.merged_df.columns if st.session_state.merged_df[c].dtype == object], index=st.session_state.merged_df.columns.get_loc("Statement") if "Statement" in st.session_state.merged_df.columns else 0)
+text_col = st.selectbox("Sentence text column", [c for c in sent_df.columns if sent_df[c].dtype==object], index=sent_df.columns.get_loc("Statement") if "Statement" in sent_df.columns else 0)
 
-# ───────── STEP 3 – dictionary build ───────────────────────
-st.header("Step 3 — Build / refine dictionary")
+# ground‑truth selectable
+obj_cols = [c for c in gt_df.columns if gt_df[c].dtype==object and c.lower().startswith("mode")]
+gt_col = st.selectbox("Ground‑truth column", obj_cols, index=obj_cols.index("mode_researcher") if "mode_researcher" in obj_cols else 0)
 
-if st.button("🧠 Auto‑generate keywords"):
-    df = st.session_state.merged_df.copy()
-    df["cleaned"] = df[text_col].apply(clean)
+likes_col    = st.selectbox("Likes column (optional)", ["None"]+gt_df.columns.tolist(), index=["None"]+gt_df.columns.tolist().index("likes") if "likes" in gt_df.columns else 0)
+comments_col = st.selectbox("Comments column (optional)", ["None"]+gt_df.columns.tolist(), index=["None"]+gt_df.columns.tolist().index("comments") if "comments" in gt_df.columns else 0)
 
+# ─────────── STEP 3 – merge ────────────────────────────────
+st.header("Step 3 — Merge on ID")
+
+merge_btn = st.button("🔗 Merge files")
+if not merge_btn:
+    st.stop()
+
+present_cols = ["ID", gt_col]
+if likes_col != "None":
+    present_cols.append(likes_col)
+if comments_col != "None":
+    present_cols.append(comments_col)
+
+missing_gt = {"ID", gt_col} - set(gt_df.columns)
+if missing_gt:
+    st.error(f"Ground‑truth file missing columns: {missing_gt}")
+    st.stop()
+
+gt_sub = gt_df[present_cols].copy()
+merged_df = sent_df.merge(gt_sub, on="ID", how="left", indicator=True)
+missing = merged_df["_merge"].eq("left_only").sum()
+merged_df.drop(columns="_merge", inplace=True)
+if missing:
+    st.warning(f"{missing} sentences had no matching ground‑truth row.")
+
+st.dataframe(merged_df.head())
+
+# ─────────── STEP 4 – dictionary ───────────────────────────
+st.header("Step 4 — Build / refine dictionary")
+
+auto_btn = st.button("🧠 Auto‑generate keywords")
+if auto_btn:
+    tmp = merged_df.copy()
+    tmp["cleaned"] = tmp[text_col].apply(clean)
     base_terms = set(DEFAULT_TACTICS[tactic])
-    df["hit"] = df["cleaned"].apply(lambda x: any(tok in x.split() for tok in base_terms))
-    pos_df = df[df["hit"]]
+    tmp_hit = tmp[tmp["cleaned"].apply(lambda x: any(tok in x.split() for tok in base_terms))]
+    word_freq = tmp_hit["cleaned"].str.split(expand=True).stack().value_counts()
+    contextual = [w for w in word_freq.index if w not in base_terms][:30]
+    auto_dict = {tactic: sorted(base_terms.union(contextual))}
+else:
+    auto_dict = {tactic: DEFAULT_TACTICS[tactic]}
 
-    stop_words = {"the","is","in","on","and","a","for","you","i","are","of","your","to","my","with","it","me","this","that","or"}
+dict_text = st.text_area("✏️ Dictionary", value=str(auto_dict), height=150)
+try:
+    user_dict = ast.literal_eval(dict_text)
+    dict_ready = True
+except Exception:
+    st.error("Invalid dictionary syntax.")
+    dict_ready = False
 
-    word_freq = pos_df["cleaned"].str.split(expand=True).stack().value_counts()
-    contextual_terms = [w for w in word_freq.index if w not in stop_words and w not in base_terms][:30]
+# ─────────── STEP 5 – classify sentences ───────────────────
+st.header("Step 5 — Classify & score")
 
-    auto_dict = {tactic: sorted(base_terms.union(contextual_terms))}
-
-    st.dataframe(word_freq.head(20).rename("Freq"))
-    dict_text = st.text_area("✏️ Edit / confirm dictionary", value=str(auto_dict), height=150)
-    try:
-        st.session_state.dictionary = ast.literal_eval(dict_text)
-        st.success("Dictionary saved.")
-        st.session_state.dict_ready = True
-    except Exception:
-        st.error("Invalid dict syntax — not saved.")
-        st.session_state.dict_ready = False
-
-# ───────── STEP 4 – classify sentences ─────────────────────
-st.header("Step 4 — Classify sentences")
-
-if st.button("🔹 Run sentence‑level classification", disabled=not st.session_state.dict_ready):
-    df = st.session_state.merged_df.copy()
+if st.button("🔹 Run classification", disabled=not dict_ready):
+    df = merged_df.copy()
     df["cleaned"] = df[text_col].apply(clean)
-    dct = st.session_state.dictionary
-
-    df["categories"] = df["cleaned"].apply(lambda x: classify(x, dct))
+    df["categories"] = df["cleaned"].apply(lambda x: classify(x, user_dict))
     df["pred_flag"] = df["categories"].apply(lambda lst: tactic in lst)
 
-    # ground‑truth flag (post‑level) propagated to each sentence
-    df["gt_flag"] = df["mode_researcher"].apply(lambda x: safe_bool(x, tactic))
+    df["gt_flag"] = df[gt_col].apply(lambda x: safe_bool(x, tactic))
 
-    st.session_state.merged_df = df
-    st.success("Sentence‑level predictions added.")
+    # sentence metrics
+    s_prec, s_rec, s_f1, _ = precision_recall_fscore_support(df["gt_flag"], df["pred_flag"], average="binary", pos_label=True, zero_division=0)
 
-if st.session_state.merged_df.empty or "pred_flag" not in st.session_state.merged_df.columns:
-    st.stop()
+    # post‑level aggregation
+    agg_cols = {"pred_flag":"max", "gt_flag":"max"}
+    if likes_col != "None":
+        agg_cols[likes_col] = "first"
+    if comments_col != "None":
+        agg_cols[comments_col] = "first"
 
-# ───────── STEP 5 – metrics ───────────────────────────────
-st.header("Step 5 — Metrics")
+    post_df = df.groupby("ID").agg(**agg_cols).reset_index()
+    p_prec, p_rec, p_f1, _ = precision_recall_fscore_support(post_df["gt_flag"], post_df["pred_flag"], average="binary", pos_label=True, zero_division=0)
 
-from sklearn.metrics import precision_recall_fscore_support
+    st.subheader("Sentence‑level metrics")
+    st.write(f"Precision **{s_prec:.3f}**   Recall **{s_rec:.3f}**   F1 **{s_f1:.3f}**")
 
-# sentence‑level
-sent_prec, sent_rec, sent_f1, _ = precision_recall_fscore_support(
-    st.session_state.merged_df["gt_flag"], st.session_state.merged_df["pred_flag"], pos_label=True, average="binary"
-)
+    st.subheader("Post‑level metrics")
+    st.write(f"Precision **{p_prec:.3f}**   Recall **{p_rec:.3f}**   F1 **{p_f1:.3f}**")
 
-st.subheader("Sentence‑level")
-st.write(
-    f"Precision **{sent_prec:.3f}**    Recall **{sent_rec:.3f}**    F1 **{sent_f1:.3f}**"
-)
+    if likes_col != "None" and comments_col != "None":
+        st.subheader("Correlation with engagement")
+        st.dataframe(post_df[["pred_flag", "gt_flag", likes_col, comments_col]].corr().round(3))
 
-# post‑level aggregation
-post_df = (
-    st.session_state.merged_df
-    .groupby("ID")
-    .agg(pred_flag=("pred_flag", "max"), gt_flag=("gt_flag", "max"), likes=("likes", "first"), comments=("comments", "first"))
-    .reset_index()
-)
-post_prec, post_rec, post_f1, _ = precision_recall_fscore_support(post_df["gt_flag"], post_df["pred_flag"], pos_label=True, average="binary")
-
-st.subheader("Post‑level (caption)")
-st.write(
-    f"Precision **{post_prec:.3f}**    Recall **{post_rec:.3f}**    F1 **{post_f1:.3f}**"
-)
-
-# correlation with engagement
-if {"likes", "comments"}.issubset(post_df.columns):
-    st.subheader("Correlation with engagement")
-    st.dataframe(post_df[["pred_flag", "gt_flag", "likes", "comments"]].corr().round(3))
-
-# ───────── STEP 6 – download ───────────────────────────────
-st.header("Step 6 — Download")
-
-st.download_button(
-    "Download sentence‑level.csv",
-    st.session_state.merged_df.to_csv(index=False).encode(),
-    file_name="sentence_level_results.csv",
-    mime="text/csv",
-)
-
-st.download_button(
-    "Download post‑level.csv",
-    post_df.to_csv(index=False).encode(),
-    file_name="post_level_results.csv",
-    mime="text/csv",
-)
+    st.download_button("Download sentence‑level.csv", df.to_csv(index=False).encode(), "sentence_level_results.csv", mime="text/csv")
+    st.download_button("Download post‑level.csv", post_df.to_csv(index=False).encode(), "post_level_results.csv", mime="text/csv")
