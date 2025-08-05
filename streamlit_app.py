@@ -19,7 +19,7 @@ st.markdown(
     2. **Pre-processing_Rolling Context Builder** – add a two-sentence (previous + current)
        rolling context window  
        *(downloads **_with_context.csv**).*
-    3. **Refinement_Classifier Creationr** 
+    3. **Dictionary_Refinement_Classifier Creation** 
     4. **Classifier_Word_Metrics** 
     5. **Join_Table**
     ---
@@ -30,6 +30,7 @@ st.markdown(
 
 # You could add a logo or additional instructions here if desired.
 # Otherwise this page is just an informational landing screen.
+
 
 
 
