@@ -12,7 +12,7 @@ st.title("🔧 Text-Analytic Project by Group A (Joseph, Jennifer, Basant, & Ism
 
 st.markdown(
     """
-    Welcome! Use the sidebar to run the five-step pipeline and you can watch the youtube presenattion of these apps in the link provided below:
+    Welcome! Use the sidebar to run the five-step pipeline and you can watch the youtube presentation of these apps in the link provided below:
 
     1. **Pre-processing_Sentence Tokenizer** – split each caption into individual sentences  
        *(downloads **_tokenised.csv**).*  
@@ -32,6 +32,7 @@ st.markdown(
 
 # You could add a logo or additional instructions here if desired.
 # Otherwise this page is just an informational landing screen.
+
 
 
 
